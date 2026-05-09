@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { AxiosHeaders } from 'axios';
 import { clearAuthSession, getToken } from './auth';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
@@ -10,8 +10,9 @@ export const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = getToken();
   if (token) {
-    config.headers = config.headers ?? {};
-    config.headers['x-auth-token'] = token;
+    const headers = AxiosHeaders.from(config.headers);
+    headers.set('x-auth-token', token);
+    config.headers = headers;
   }
   return config;
 });

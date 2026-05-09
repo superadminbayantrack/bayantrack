@@ -17,12 +17,76 @@ import User from "./models/User.js";
 import Department from "./models/Department.js";
 import Announcement from "./models/Announcement.js";
 import Official from "./models/Official.js";
-import { bootstrapAccounts, DEFAULT_ADMIN_PERMISSIONS } from "./config/bootstrapAccounts";
+import { DEFAULT_ADMIN_PERMISSIONS, getBootstrapAccounts, type BootstrapAccount } from "./config/bootstrapAccounts";
 
 let dbInitialized = false;
 let dbInitPromise: Promise<void> | null = null;
 
 dotenv.config();
+
+async function findBootstrapAccountOwner(account: BootstrapAccount) {
+  return User.findOne({
+    $or: [
+      { username: account.username },
+      { email: account.email },
+      { contactNumber: account.contactNumber },
+    ],
+  });
+}
+
+async function hasConflictingUniqueValue(field: "email" | "contactNumber", value: string, ownerId: unknown) {
+  const conflict = await User.findOne({
+    [field]: value,
+    _id: { $ne: ownerId },
+  })
+    .select("_id")
+    .lean();
+
+  return Boolean(conflict);
+}
+
+async function repairBootstrapAccount(account: BootstrapAccount) {
+  const existing = await findBootstrapAccountOwner(account);
+  const baseUpdate: Record<string, unknown> = {
+    username: account.username,
+    role: account.role,
+    firstName: account.firstName,
+    lastName: account.lastName,
+    address: account.address,
+    status: "active",
+    failedLoginAttempts: 0,
+    lockUntil: null,
+    ...(account.role === "admin" ? { adminPermissions: DEFAULT_ADMIN_PERMISSIONS } : {}),
+  };
+
+  if (!existing) {
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(account.password, salt);
+    await User.create({
+      ...baseUpdate,
+      email: account.email,
+      contactNumber: account.contactNumber,
+      password: hashedPassword,
+    });
+    return;
+  }
+
+  if (!(await hasConflictingUniqueValue("email", account.email, existing._id))) {
+    baseUpdate.email = account.email;
+  }
+
+  if (!(await hasConflictingUniqueValue("contactNumber", account.contactNumber, existing._id))) {
+    baseUpdate.contactNumber = account.contactNumber;
+  }
+
+  const passwordMatches = await bcrypt.compare(account.password, existing.password);
+  if (!passwordMatches) {
+    const salt = await bcrypt.genSalt(10);
+    baseUpdate.password = await bcrypt.hash(account.password, salt);
+  }
+
+  await User.updateOne({ _id: existing._id }, baseUpdate);
+}
 
 async function connectAndSeed() {
   const uri = process.env.MONGO_URI;
@@ -37,39 +101,8 @@ async function connectAndSeed() {
 
   if (dbInitialized) return;
 
-  for (const account of bootstrapAccounts) {
-    const existing = await User.findOne({ username: account.username });
-    const baseUpdate = {
-      username: account.username,
-      role: account.role,
-      firstName: account.firstName,
-      lastName: account.lastName,
-      email: account.email,
-      contactNumber: account.contactNumber,
-      address: account.address,
-      status: "active",
-      failedLoginAttempts: 0,
-      lockUntil: null,
-      ...(account.role === "admin" ? { adminPermissions: DEFAULT_ADMIN_PERMISSIONS } : {}),
-    };
-
-    if (!existing) {
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(account.password, salt);
-      await User.create({
-        ...baseUpdate,
-        password: hashedPassword,
-      });
-      continue;
-    }
-
-    const passwordMatches = await bcrypt.compare(account.password, existing.password);
-    const update: Record<string, unknown> = { ...baseUpdate };
-    if (!passwordMatches) {
-      const salt = await bcrypt.genSalt(10);
-      update.password = await bcrypt.hash(account.password, salt);
-    }
-    await User.updateOne({ _id: existing._id }, update);
+  for (const account of getBootstrapAccounts()) {
+    await repairBootstrapAccount(account);
   }
 
   const departmentCount = await Department.countDocuments();
