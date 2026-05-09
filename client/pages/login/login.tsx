@@ -577,7 +577,7 @@ const Login = () => {
                   <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 ml-1">Email Address</label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"><Mail size={18} /></span>
-                    <input type="email" required placeholder="your@email.com" name="email" value={resetData.email} onChange={handleResetChange} className="w-full rounded-xl border border-slate-200 bg-slate-50 py-5 pl-12 text-sm outline-none transition focus:border-blue-500 focus:bg-white" />
+                    <input type="email" required placeholder="your@email.com" name="email" autoComplete="email" value={resetData.email} onChange={handleResetChange} className="w-full rounded-xl border border-slate-200 bg-slate-50 py-5 pl-12 text-sm outline-none transition focus:border-blue-500 focus:bg-white" />
                   </div>
                 </div>
                 <button type="submit" disabled={otpLoading.active} className="flex items-center justify-center gap-2 rounded-xl bg-[#1e293b] py-5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-60">Get OTP</button>

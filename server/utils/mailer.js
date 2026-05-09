@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 
 const DEFAULT_MAIL_USER = process.env.MAIL_USER || process.env.NOTIFICATION_EMAIL || 'superadminbayantrack@gmail.com';
 const DEFAULT_MAIL_FROM = process.env.MAIL_FROM || `"BayanTrack" <${DEFAULT_MAIL_USER}>`;
+const DEFAULT_RESEND_FROM = process.env.RESEND_FROM_EMAIL || 'BayanTrack <onboarding@resend.dev>';
 
 let transporterInstance = null;
 const MAIL_SEND_TIMEOUT_MS = Number(process.env.MAIL_SEND_TIMEOUT_MS || 15000);
@@ -31,10 +32,56 @@ export function getMailTransporter() {
   return transporterInstance;
 }
 
+async function sendWithResend(options = {}) {
+  const apiKey = process.env.RESEND_API_KEY || '';
+  if (!apiKey) return false;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), MAIL_SEND_TIMEOUT_MS);
+
+  try {
+    const to = Array.isArray(options.to) ? options.to : [options.to].filter(Boolean);
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: options.from || DEFAULT_RESEND_FROM,
+        to,
+        subject: options.subject || '',
+        html: options.html || '',
+        text: options.text || '',
+        reply_to: options.replyTo,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Resend API error ${response.status}: ${body}`);
+    }
+
+    return true;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function safeSendMail(options = {}) {
+  if (process.env.RESEND_API_KEY) {
+    try {
+      return await sendWithResend(options);
+    } catch (err) {
+      console.error('Failed to send email using Resend:', err);
+      return false;
+    }
+  }
+
   const transporter = getMailTransporter();
   if (!transporter) {
-    console.warn('Mail transporter is not configured. Set MAIL_USER and MAIL_PASS in .env.');
+    console.warn('Mail transporter is not configured. Set RESEND_API_KEY or MAIL_USER and MAIL_PASS in .env.');
     return false;
   }
 
