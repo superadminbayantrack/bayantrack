@@ -1,8 +1,11 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'secrettoken';
 const PERMISSION_ACTIONS = ['view', 'add', 'edit', 'archive', 'delete'];
+
+function getJwtSecret() {
+  return process.env.JWT_SECRET || 'secrettoken';
+}
 
 function defaultPermissionFlags() {
   return { view: true, add: true, edit: true, archive: true, delete: true };
@@ -41,7 +44,7 @@ export const auth = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, getJwtSecret());
     const user = await User.findById(decoded.user.id).select('role adminPermissions');
 
     if (!user) {
@@ -85,7 +88,7 @@ export const optionalAuth = async (req, _res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, getJwtSecret());
     const user = await User.findById(decoded.user.id).select('role adminPermissions');
     if (user) {
       req.user = {

@@ -3,16 +3,20 @@ export type UserRole = "resident" | "admin" | "superadmin";
 const ROLE_KEY = "role";
 const TOKEN_KEY = "token";
 
+export function normalizeRole(value: unknown): UserRole | null {
+  const role = String(value || "").trim().toLowerCase();
+  if (role === "resident" || role === "admin" || role === "superadmin") {
+    return role;
+  }
+  return null;
+}
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
 export function getRole(): UserRole | null {
-  const value = localStorage.getItem(ROLE_KEY);
-  if (value === "resident" || value === "admin" || value === "superadmin") {
-    return value;
-  }
-  return null;
+  return normalizeRole(localStorage.getItem(ROLE_KEY));
 }
 
 export function setAuthSession(token: string, role: UserRole) {

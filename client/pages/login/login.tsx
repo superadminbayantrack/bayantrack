@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, User, Lock, ArrowRight, ArrowLeft, Mail, Phone, Upload, X, CloudSun, Megaphone, Activity, CheckCircle } from "lucide-react";
 import { FeedbackModal } from "@/components/FeedbackModal";
-import { getRole, getRoleHome, getToken, setAuthSession, type UserRole } from "@/lib/auth";
+import { clearAuthSession, getRoleHome, getToken, normalizeRole, setAuthSession } from "@/lib/auth";
 import { api } from "@/lib/api";
 
 type ViewState = "login" | "forgot" | "create" | "reset";
@@ -185,10 +185,7 @@ const Login = () => {
           identifier: loginData.identifier,
           password: loginData.password,
         });
-        const role: UserRole =
-          res.data.role === "admin" || res.data.role === "superadmin"
-            ? res.data.role
-            : "resident";
+        const role = normalizeRole(res.data.role) || "resident";
 
         setAuthSession(res.data.token, role);
         setLoginProgress(100);
@@ -361,9 +358,30 @@ const Login = () => {
 
   useEffect(() => {
     const token = getToken();
-    if (token) {
-      navigate(getRoleHome(getRole()));
-    }
+    if (!token) return;
+
+    let cancelled = false;
+    api
+      .get("/api/auth/user")
+      .then((res) => {
+        if (cancelled) return;
+        const role = normalizeRole(res.data?.role);
+        if (!role) {
+          clearAuthSession();
+          return;
+        }
+        setAuthSession(token, role);
+        navigate(getRoleHome(role), { replace: true });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          clearAuthSession();
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [navigate]);
 
   const currentUpdate = liveUpdates[currentUpdateIndex] || { category: "Announcement", text: "Loading updates..." };
