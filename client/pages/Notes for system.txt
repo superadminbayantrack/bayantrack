@@ -1,0 +1,428 @@
+homepage user resident side
+
+
+app.tsx or index.tsx
+
+can add image in projects & activities and automatically move every 3 seconds also in community facilites can add edit archive delete images in the card that will be 
+    AdminDashboard.tsx
+on suepradmin dashbaord modifiers and configurations
+    ProfileSettings.tsx
+also in profile settings user can edit 
+username and password 
+and breakdown of full name First name, Middle name, Lastname,
+Address to
+blk, lot, Subdivision/compound, barangay, city, province, zip code
+and on the choices of preferred contact method only Email not sms/text and phone call
+that will be seen too on admin and supeadmin dashboard the breakdown of each resident
+user information details
+and in the homepage again of resident user is i notice the projects & activities below
+that is the card of advisory the cards annoucements updates in the system is off
+and overlapped can you fix the size of the card conatiner when its on
+smartphone adn tablet devices responsivess so it wont like overlapped again
+feels off
+
+
+login.tsx
+also when registering in the system
+the system must validated or filter other city or barangay only exclusive for
+Mambog II, Bacoor City Cavite
+anyone who is residing or live in around Mambog II only and search the geographic
+for that and what are some compounds subdivision etc or road residing only on Mambog II
+lets say a road that is residing in mambog II a subidivision or compound
+the system will analyze the data in registering and if the user is not residing 
+near or nearby on Mambog II the system wont allow to register the user resident
+and must only for Mambog II residents only the system is allowed only for
+mambog II residents only this must be connected both system and database for
+privacy informations something like that ok.
+
+ProfileSettings.tsx or header.tsx
+also add a notification bell for the user residnets for notif about
+the request of services, updated the process of papers etc stuff like that
+must inside of the dropdown of the profile icon the name profile settings and 
+logout i think between profile settings and logout in the middle of it 
+add a notification bell 
+
+and ProfileSettings in the my acitvity history
+show only like 3 histories and the other data history will be hidden 
+blurred out and theres a button where it says exapnd
+a modal popup will see the recent activities where the user resident have been made
+so for good ui/ux exeprience for user resident so every add of activity wont be
+go down or overlapped
+
+ive noticed when on the hamburger on the superadmin and admin dashboard
+the hamburger like the dropdown it must be over place on top of the contents
+and not when expanding it just move the contents below it will just
+place on top so ui/ux expeiricne will be better and not will be off and also
+both admin and superadmin add some icons ok not like plain dashboard
+add visibilt and feedback icons etc.
+
+also add in the login.tsx login page
+
+the BayanTrack app name and the live community updates below the login card container ok just below of it
+
+another important module or function for the system is that when evacuation process
+when the user click find the nearest evacuation center the system will suggest and recomendd
+the nereast and safest route to the evacuation center when some natural disasters happen like
+typphoons baha, earthquake, fire some post of meralco just like that disasters
+add some api that will help the user resident to have a feedback and visibility of the system
+to give guide to the user to route to their safest and nearest route to the evacuation center
+like that. then it must have on barangay updates where a module or function card container with button
+with feedback and visibility like "Find me a Nearest evacuation Center" then the api and system will
+contact each other and will give for the user the best and suitable nearest evacuation center needed
+to  guide for the user resident, lets say the system or the superadmin declare that this covered court 
+or school or barangay is the nearest and safest to go to when natural disasters happen stuff like that
+implement and integrate that kind of safety precaution module function for user resident ok and the 
+API needed
+
+=======
+
+add a a welcome message and thanks for registering in our system make it like
+user friendly aftr creating account in our system bayan track then
+after creating account another email saying thanks for registering etc. make the format like a card container
+with bayan track mambog II greeting with the registered name first name and full name stuff like that
+
+add like a user like roles like for the admin give roles or permissions for the superadmin
+like in the users add like give roles or permissioon
+add or edit or arhive or delete
+officials
+annoucements
+reports
+service request
+messages
+subscribers
+
+that can be give from superadmin to admin roles or persmissions just to have modify from the admin
+or update something so it can have a job for the admin so superadmin will just wait approve that sort of thing
+
+=========================
+
+.\run-online.bat prod
+pnpm start
+taskkill /F /IM node.exe
+
+pnpm dev
+
+======================================
+
+
+superadmin dashboard
+
+users must be list
+view details
+jnside od it must first view details and a button like completed view details then another custom modal approve or reject
+
+login
+create accoutn and forgotpassord must magkatabi
+signup must have
+must be list type
+must have married or not
+need marriage contract
+may gender
+may street
+placeholder
+same sizes input field
+
+
+dashboard user resident
+
+prpfile serttings
+layout
+fname mname lname top layout
+Middle 
+username email contact note
+bottom
+other address details, street
+add childer if childern wants to access their parents account if gusto kumuha ng mga docu like 
+idegency or clearance naka set ung minors to their data to the parents if parents have children 
+add table for childern sub set table for childern so childer has access to their parents account 
+18 below cannot use minors,
+
+remove emial change it to note
+
+============================================
+
+
+next is under in the superadmin dashboard
+under users add like added childername name and email account give permission or not something like that
+
+suepradmin dashboard
+d parin sila magkakamuka
+
+==================================================
+
+hey codex can you implement this on the system maybe it needs this to be polish and ready to deploy
+
+2.1 Most Influential HCI Guideline Sets
+Ben Shneiderman: 8 Golden Rules (Interaction rules)
+Jakob Nielsen: 10 Usability Heuristics (Usability evaluation)
+Don Norman: Design Principles (Cognitive design, affordances, feedback)
+ISO (International Organization for Standardization): ISO 9241 Standards (Effectiveness, Efficiency, Satisfaction)
+W3C (World Wide Web Consortium): WCAG Accessibility (POUR principles)
+2.2 Ben Shneiderman's 8 Golden Rules
+Strive for Consistency: Use consistent terminology, colors, layouts, and actions. Similar tasks should operate in similar ways.
+Enable Frequent Users to Use Shortcuts: Use keyboard shortcuts and gesture controls.
+Offer Informative Feedback: Every action should produce feedback.
+Design Dialogs to Yield Closure: Tasks should have clear beginning, middle, and end. Show confirmation when completed.
+Prevent Errors: Use input validation and disable invalid options.
+Permit Easy Reversal of Actions: Provide Undo/Redo, Cancel buttons, and Version history.
+Support Internal Locus of Control: Users should feel in control, not the system. Avoid unexpected changes.
+Reduce Short-Term Memory Load: Use recognition over recall, keep instructions visible, and chunk information.
+2.3 Jakob Nielsen's 10 Usability Heuristics
+Visibility of System Status: Keep users informed about what is happening.
+Match Between System and Real World: Use familiar language and real-world metaphors.
+User Control and Freedom: Provide exits and undo options.
+Consistency and Standards: Follow platform conventions.
+Error Prevention: Prevent problems before they occur.
+Recognition Rather Than Recall: Minimize memory burden.
+Flexibility and Efficiency of Use: Support both novice and expert users.
+Aesthetic and Minimalist Design: Avoid irrelevant information.
+Help Users Recognize, Diagnose, and Recover from Errors: Use clear error messages.
+Help and Documentation: Provide searchable help when needed.
+2.4 Don Norman's Design Principles
+Affordance: Design elements should suggest how they are used.
+Signifiers: Visual cues indicating where action should occur.
+Feedback: Immediate response to actions.
+Constraints: Limit possible actions to prevent errors.
+Mapping: Clear relationship between control and outcome.
+Conceptual Models: Users should understand how the system works.
+2.5 WCAG Accessibility Guidelines (POUR)
+Perceivable: Information must be presentable in ways users can perceive (available to all senses).
+Operable: Interface must be usable via keyboard, users must be able to operate controls.
+Understandable: Clear and predictable, content easy to complete.
+Robust: Compatible with assistive technologies and different devices.
+2.6 Key Practical HCI Guidelines
+Interface Design: Use visual hierarchy, maintain alignment.
+Form Design: Use whitespace effectively, maintain color contrast, group related fields, use inline validation, provide clear error messages, mark required fields clearly.
+Navigation Design: Keep navigation consistent, use breadcrumbs, provide search functionality.
+Mobile HCI Guidelines: Touch-friendly targets, avoid hover-only interactions, use responsive layouts.
+2.7 Good Error Message Components
+State what happened: Clearly indicate the error.
+Explain why: Give the reason for the error.
+Provide solution: Tell the user how to fix it.
+Avoid technical jargon: Use plain language (e.g., 'Password must be 8 characters' instead of 'Error 0x00021').
+2.8 Steps in User-Centered Design (UCD)
+Involve Users in the Design Process: Include users from the start, gather feedback to shape the system.
+Understand User Needs: Conduct user research (interviews, surveys) to understand goals, tasks, problems.
+Iterative Design: Create prototypes, test, gather feedback, refine to identify usability issues early.
+2.9 Criteria Categories for HCI Guidelines
+Age/Generation: Design considering age demographics.
+Gender: Design considering gender preferences.
+Disability: Design for accessibility.
+Country: Design for cultural and regional differences.
+Consumer: Design for consumer types.
+Occupation: Design based on professional usage.
+2.10 Usability Criteria
+Learnability: How easy to begin using system with little/no training. Helpful instructions/onboarding.
+Efficiency: Time or effort required. Reduces unnecessary steps/actions.
+Memorability: Easy to remember how to use after a break. Intuitive for occasional users.
+Error Handling: How system helps users recover from errors.
+Satisfaction: How pleasant the system is to use.
+Error Prevention and Recovery: Can users avoid mistakes or recover easily?
+Effectiveness: How well system supports achieving goals accurately and completely.
+2.11 UI / UCD Criteria
+Consistency: Keep similar actions and layouts predictable.
+Feedback: System provides immediate feedback for user action.
+Affordance: Controls suggest their function.
+Flexible/Customizable: System adapts to different users needs.
+User Involvement: Users are involved in requirements gathering and testing.
+Accessible: Accommodate users with different abilities.
+Perceivable: Information must be available to all senses.
+Operable: Users must be able to operate controls.
+Understandable: Content must be easy to complete.
+Robust: Works across different devices and assistive technologies.
+2.12 Cognitive and Psychological Criteria
+Minimizing cognitive load: Avoid confusing layouts, unnecessary options or complex jargon.
+Physical ergonomics: The interface should not strain the body.
+Match with Real World: Use familiar concepts and language.
+Recognition over Recall: Show options rather than asking users to remember command.
+Error Tolerance: Minimize consequences of mistakes.
+Minimalist Design: Avoid unnecessary complexity.
+2.13 Aesthetic and Design Criteria
+Visual Clarity: Clear/readable fonts, proper contrast, intuitive layout.
+Consistency in Design: Similar colors, fonts, layouts across application.
+Emotional Design: Engages users through enjoyable or satisfying interactions.
+Aesthetic Design: Visually appealing interfaces increase satisfaction.
+Motivation and Engagement: Encourage continued use.
+2.14 Safety and Security Elements
+Protection: Designs must consider user safety, data privacy, and preventing harm.
+Authentication: Example: Two-factor authentication for online banking.
+Warning Dialogs: For destructive actions, like deleting files permanently.
+Dark Mode: To reduce eye strain at night.
+2.15 Key Principles of Visual Display Layout
+Clarity and Readability: Text easy to read (legible fonts, size, contrast). Use spacing to reduce clutter.
+Consistency: Keep layout consistent across screens to build familiarity.
+Visual Hierarchy: Arrange elements to guide attention using size, color, contrast, position.
+Alignment and Grid Use: Use grid systems to align elements neatly for an organized look.
+Grouping and Proximity: Group related elements; close elements are perceived as related.
+Whitespace (Negative Space): Space around elements improves focus, reduces visual noise, avoids cramming.
+Balance and Symmetry: Distribute elements evenly for a balanced feel (symmetrical or asymmetrical).
+Navigation Placement: Main navigation easily visible/accessible (top or left). Familiar placement.
+Color and Contrast: Use color to differentiate and draw attention. Ensure accessibility contrast.
+Responsiveness and Adaptability: Layout must adjust for screen sizes (mobile, tablet, desktop).
+2.16 Hierarchy and Structure Details
+Primary Information: Most important elements (main buttons, critical info) should be larger, prominent, highlighted with contrast.
+Secondary Information: Less critical content (secondary actions, less urgent details) visually downplayed via smaller fonts/subtler colors.
+2.17 Navigation and Placement Elements
+Navigation Bar: Prominently placed (top/side) and consistent across the system.
+Breadcrumbs: Trace navigation path in complex systems.
+Search Bar: Easy to locate, typically placed at the top.
+Call-to-Action (CTA): Important buttons stand out using color, size, positioning.
+2.18 Typography Rules
+Readability: Body font size of 16px (on web) or slightly larger is ideal.
+Contrast: Sufficient contrast between text and background for visually impaired users.
+Font Families: Stick to limited number (2-3) for visual harmony. Use weights and sizes to differentiate.
+2.19 Color and Contrast Rules
+Color Palette: Reflects brand/purpose, harmonious, avoid clashing/overly bright colors.
+Contrast for Accessibility: Don't convey important info through color alone (color blindness).
+Color Coding: Red for errors, Green for success. Must provide text labels for color blindness.
+
+maybe it needs to adapt this kind of game changing rules can you apply this to 
+resident users, admins, 
+and super admin also on the 
+login too can you do that?
+
+
+====================================================
+
+and when childern account logged in the child account cannot modify any on the personal information of the parents account
+there will be a new tab named Childrens account profile settings only the childerns account will be visible like
+Password and Security
+Account and Contact
+Name Layout
+Choose Profile Photo
+My Activity
+Recent
+
+that only shows on childrens account profile settings not visible on parents account that will be disable
+when child account user 
+
+superadmin dashbaordd
+
+dapat ung notification bell ay katabi ng logout hindi dapat sa loob ng operations over view dapat katabi ng logout button
+itsura is notification bell icon with small blip on the icon with total of numbers of notifications then
+it can expand and collapse in the 
+Account Status Distribution
+4
+
+Total
+
+Active Users
+3
+Pending Users
+0
+Suspended Users
+1
+System Workload Mix
+10
+
+Total
+
+Services
+3
+Reports
+3
+Messages
+3
+Subscribers
+1
+Previous Months Activity
+Last 6 months
+Registered Accounts
+
+Oct
+0
+Nov
+0
+Dec
+0
+Jan
+0
+Feb
+0
+Mar
+2
+Service Requests
+
+Oct
+0
+Nov
+0
+Dec
+0
+Jan
+0
+Feb
+0
+Mar
+3
+Reports
+
+Oct
+0
+Nov
+0
+Dec
+0
+Jan
+0
+Feb
+0
+Mar
+3
+Messages
+
+Oct
+0
+Nov
+0
+Dec
+0
+Jan
+0
+Feb
+0
+
+
+can show like expand when hovering can show whats the data is inside parang ganon ha
+
+superadmin dashboard users tab
+
+pangt ng layout or format structure ng Linked Children
+kapag kaya iminimal or iaayos ung layout para naman
+maayos ung layout hindi sabog sabog hindi equal dapat
+magmumukang maayos at hindi sabog
+
+then sa users ulit wala na ung parang ung status button then approve or rejet parang ganon sa users kapag
+si superadmin dashboard ng view details double check data then check status either reject or approved
+bago ipakita ang Account Control parang ganito
+check status if approved lalabas ito Account Control
+
+
+resident
+
+active
+Approve / Save
+
+kapag reject stay muna siya as pending dapat konektado lahat ah both system and database para walang mabug or masira
+
+also pakipalitan ng account ng superamdmin
+
+from
+superadmin@bayantrack.com
+
+to superadminbayantrack@gmail.com
+
+para mag jan mag update ung mga notif para mag synch ung mga nangyayare sa system at magsesend sa email nayan
+
+
+============================
+
+what to consider when starting a full management system any kind what need to be considered
+
+patch this
+
+I can apply the same parent/child/admin/superadmin 
+email-notification logic to Reports and Messages too, 
+so the whole system follows one consistent notification rule.
+
+diba sa service request may ibat ibang processing papers or documents
