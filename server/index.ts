@@ -17,8 +17,10 @@ import User from "./models/User.js";
 import Department from "./models/Department.js";
 import Announcement from "./models/Announcement.js";
 import Official from "./models/Official.js";
+import { bootstrapAccounts, DEFAULT_ADMIN_PERMISSIONS } from "./config/bootstrapAccounts";
 
 let dbInitialized = false;
+let dbInitPromise: Promise<void> | null = null;
 
 dotenv.config();
 
@@ -35,48 +37,39 @@ async function connectAndSeed() {
 
   if (dbInitialized) return;
 
-  const adminExists = await User.findOne({ username: "admin123" });
-  if (!adminExists) {
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash("admin123", salt);
-    await User.create({
-      username: "admin123",
-      password: hashedPassword,
-      role: "admin",
-      firstName: "Admin",
-      lastName: "User",
-      email: "admin@bayantrack.com",
-      contactNumber: "00000000000",
-      address: "Barangay Hall",
+  for (const account of bootstrapAccounts) {
+    const existing = await User.findOne({ username: account.username });
+    const baseUpdate = {
+      username: account.username,
+      role: account.role,
+      firstName: account.firstName,
+      lastName: account.lastName,
+      email: account.email,
+      contactNumber: account.contactNumber,
+      address: account.address,
       status: "active",
-    });
-  } else {
-    await User.updateOne(
-      { _id: adminExists._id },
-      { status: "active", failedLoginAttempts: 0, lockUntil: null },
-    );
-  }
+      failedLoginAttempts: 0,
+      lockUntil: null,
+      ...(account.role === "admin" ? { adminPermissions: DEFAULT_ADMIN_PERMISSIONS } : {}),
+    };
 
-  const superAdminExists = await User.findOne({ username: "superAdmin123" });
-  if (!superAdminExists) {
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash("superAdmin123", salt);
-    await User.create({
-      username: "superAdmin123",
-      password: hashedPassword,
-      role: "superadmin",
-      firstName: "Super",
-      lastName: "Admin",
-      email: "superadminbayantrack@gmail.com",
-      contactNumber: "00000000001",
-      address: "City Hall",
-      status: "active",
-    });
-  } else {
-    await User.updateOne(
-      { _id: superAdminExists._id },
-      { status: "active", failedLoginAttempts: 0, lockUntil: null, email: "superadminbayantrack@gmail.com" },
-    );
+    if (!existing) {
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(account.password, salt);
+      await User.create({
+        ...baseUpdate,
+        password: hashedPassword,
+      });
+      continue;
+    }
+
+    const passwordMatches = await bcrypt.compare(account.password, existing.password);
+    const update: Record<string, unknown> = { ...baseUpdate };
+    if (!passwordMatches) {
+      const salt = await bcrypt.genSalt(10);
+      update.password = await bcrypt.hash(account.password, salt);
+    }
+    await User.updateOne({ _id: existing._id }, update);
   }
 
   const departmentCount = await Department.countDocuments();
@@ -156,6 +149,17 @@ async function connectAndSeed() {
   dbInitialized = true;
 }
 
+async function ensureDatabaseReady() {
+  if (dbInitialized) return;
+  if (!dbInitPromise) {
+    dbInitPromise = connectAndSeed().catch((err) => {
+      dbInitPromise = null;
+      throw err;
+    });
+  }
+  await dbInitPromise;
+}
+
 export function createServer() {
   const app = express();
 
@@ -209,8 +213,14 @@ export function createServer() {
 
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-  void connectAndSeed().catch((err) => {
-    console.error("MongoDB init failed:", err);
+  app.use("/api", async (_req, _res, next) => {
+    try {
+      await ensureDatabaseReady();
+      next();
+    } catch (err) {
+      console.error("MongoDB init failed:", err);
+      next(err);
+    }
   });
 
   // Keep API paths consistent in both dev and production.
