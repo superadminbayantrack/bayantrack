@@ -1,0 +1,6 @@
+"$schema" = "./node_modules/wrangler/config-schema.json"
+name = "bayan-track"
+pages_build_output_dir = "dist/spa"
+compatibility_date = "2026-05-09"
+send_metrics = false
+

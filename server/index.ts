@@ -202,22 +202,44 @@ export function createServer() {
     .map((x) => x.trim())
     .filter(Boolean);
 
-  app.use(
-    cors({
-      origin(origin, callback) {
+  const corsMiddleware = cors((req, callback) => {
+    const requestHost = req.headers.host;
+    const forwardedHost = String(req.headers["x-forwarded-host"] || "");
+
+    callback(null, {
+      origin(origin, originCallback) {
         // Allow same-origin/non-browser requests.
-        if (!origin) return callback(null, true);
+        if (!origin) return originCallback(null, true);
         if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
-          return callback(null, true);
+          return originCallback(null, true);
         }
-        return callback(new Error("CORS blocked"));
+
+        try {
+          const originHost = new URL(origin).host;
+          if (originHost === requestHost || originHost === forwardedHost) {
+            return originCallback(null, true);
+          }
+        } catch (_err) {
+          // Fall through to the explicit CORS block below.
+        }
+
+        return originCallback(new Error("CORS blocked"));
       },
       credentials: true,
-    }),
-  );
+    });
+  });
+
+  app.use("/api", corsMiddleware);
 
   // Basic security headers.
   app.use((req, res, next) => {
+    const isViteDevFrontend =
+      process.env.NODE_ENV !== "production" && !req.path.startsWith("/api");
+
+    if (isViteDevFrontend) {
+      return next();
+    }
+
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
