@@ -23,9 +23,11 @@ let dbInitialized = false;
 dotenv.config();
 
 async function connectAndSeed() {
-  const uri =
-    process.env.MONGO_URI ||
-    "mongodb+srv://BayanTrack:BayanTrackBSIT3A@bayantrack.qc3gvju.mongodb.net/bayantrack?appName=BayanTrack";
+  const uri = process.env.MONGO_URI;
+
+  if (!uri) {
+    throw new Error("MONGO_URI is not set");
+  }
 
   if (mongoose.connection.readyState === 0) {
     await mongoose.connect(uri);

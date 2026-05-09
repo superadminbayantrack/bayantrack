@@ -35,9 +35,11 @@ app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/content', contentRoutes);
 
 // Database Connection
-// I have inserted your username (BayanTrack) and password (BayanTrackBSIT3A)
-// and added the database name 'bayantrack' so it doesn't save to 'test' by default.
-const uri = process.env.MONGO_URI || "mongodb+srv://BayanTrack:BayanTrackBSIT3A@bayantrack.qc3gvju.mongodb.net/bayantrack?appName=BayanTrack";
+const uri = process.env.MONGO_URI;
+
+if (!uri) {
+  throw new Error("MONGO_URI is not set");
+}
 
 mongoose.connect(uri)
   .then(async () => {
