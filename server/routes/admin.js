@@ -1,8 +1,8 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import User from '../models/User.js';
 import ActivityLog from '../models/ActivityLog.js';
 import ServiceRequest from '../models/ServiceRequest.js';
@@ -15,9 +15,7 @@ import { auth, requireRoles } from '../middleware/auth.js';
 import { logSystemEvent, sendUserMail } from '../utils/notifications.js';
 
 const router = express.Router();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DAILY_ACTIVITY_DIR = path.resolve(__dirname, '../data/daily-activity');
+const DAILY_ACTIVITY_DIR = path.join(os.tmpdir(), 'bayantrack-daily-activity');
 const DEFAULT_ADMIN_PERMISSIONS = {
   officials: { view: true, add: true, edit: true, archive: true, delete: true },
   announcements: { view: true, add: true, edit: true, archive: true, delete: true },
