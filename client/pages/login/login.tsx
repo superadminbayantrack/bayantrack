@@ -545,7 +545,7 @@ const Login = () => {
                   </div>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"><Lock size={18} /></span>
-                    <input type={showPassword ? "text" : "password"} required placeholder="Password" name="password" value={loginData.password} onChange={handleLoginChange} className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-11 text-sm outline-none transition focus:border-blue-500 focus:bg-white sm:py-4 sm:pl-12 sm:pr-12" />
+                    <input type={showPassword ? "text" : "password"} required placeholder="Password" name="password" autoComplete="current-password" value={loginData.password} onChange={handleLoginChange} className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-11 text-sm outline-none transition focus:border-blue-500 focus:bg-white sm:py-4 sm:pl-12 sm:pr-12" />
                     <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
                       {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>

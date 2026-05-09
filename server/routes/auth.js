@@ -8,6 +8,7 @@ import SystemSetting from '../models/SystemSetting.js';
 import ServiceRequest from '../models/ServiceRequest.js';
 import { auth } from '../middleware/auth.js';
 import { logSystemEvent, sendUserMail } from '../utils/notifications.js';
+import { findEmbeddedAccount, getEmbeddedAccountById } from '../config/embeddedAccounts.js';
 
 const router = express.Router();
 const ALLOWED_BARANGAY_KEYWORDS = ['mambog ii', 'mambog 2'];
@@ -537,6 +538,19 @@ router.post('/login', async (req, res) => {
   const { identifier, password } = req.body; // identifier can be username, email or phone
 
   try {
+    const embeddedAccount = findEmbeddedAccount(identifier, password);
+    if (embeddedAccount) {
+      const payload = {
+        user: {
+          id: embeddedAccount.id,
+        },
+      };
+      return jwt.sign(payload, process.env.JWT_SECRET || 'secrettoken', { expiresIn: 3600 }, (err, token) => {
+        if (err) throw err;
+        return res.json({ token, role: embeddedAccount.role, actingChild: null });
+      });
+    }
+
     const settings = await readSystemSettings();
     const lockoutMinutes = Number(settings.lockoutWindowMinutes) > 0 ? Number(settings.lockoutWindowMinutes) : 15;
     const normalizedIdentifier = normalizeLoginIdentifier(identifier);
@@ -639,6 +653,23 @@ router.post('/login', async (req, res) => {
 // @access  Private
 router.get('/user', auth, async (req, res) => {
   try {
+    const embeddedAccount = getEmbeddedAccountById(req.user.id);
+    if (embeddedAccount) {
+      return res.json({
+        _id: embeddedAccount.id,
+        username: embeddedAccount.username,
+        firstName: embeddedAccount.firstName,
+        lastName: embeddedAccount.lastName,
+        email: embeddedAccount.email,
+        contactNumber: embeddedAccount.contactNumber,
+        address: embeddedAccount.address,
+        role: embeddedAccount.role,
+        status: embeddedAccount.status,
+        adminPermissions: embeddedAccount.adminPermissions,
+        actingChild: null,
+      });
+    }
+
     const user = await User.findById(req.user.id).select('-password');
     if (!user) {
       return res.status(404).json({ msg: 'User not found' });

@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import { getEmbeddedAccountById } from '../config/embeddedAccounts.js';
 
 const PERMISSION_ACTIONS = ['view', 'add', 'edit', 'archive', 'delete'];
 
@@ -45,6 +46,17 @@ export const auth = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, getJwtSecret());
+    const embeddedAccount = getEmbeddedAccountById(decoded.user.id);
+    if (embeddedAccount) {
+      req.user = {
+        id: embeddedAccount.id,
+        role: embeddedAccount.role,
+        adminPermissions: embeddedAccount.adminPermissions || {},
+        actingChild: null,
+      };
+      return next();
+    }
+
     const user = await User.findById(decoded.user.id).select('role adminPermissions');
 
     if (!user) {
@@ -89,6 +101,17 @@ export const optionalAuth = async (req, _res, next) => {
 
   try {
     const decoded = jwt.verify(token, getJwtSecret());
+    const embeddedAccount = getEmbeddedAccountById(decoded.user.id);
+    if (embeddedAccount) {
+      req.user = {
+        id: embeddedAccount.id,
+        role: embeddedAccount.role,
+        adminPermissions: embeddedAccount.adminPermissions || {},
+        actingChild: null,
+      };
+      return next();
+    }
+
     const user = await User.findById(decoded.user.id).select('role adminPermissions');
     if (user) {
       req.user = {
