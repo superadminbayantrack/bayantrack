@@ -4,6 +4,7 @@ const DEFAULT_MAIL_USER = process.env.MAIL_USER || process.env.NOTIFICATION_EMAI
 const DEFAULT_MAIL_FROM = process.env.MAIL_FROM || `"BayanTrack" <${DEFAULT_MAIL_USER}>`;
 
 let transporterInstance = null;
+const MAIL_SEND_TIMEOUT_MS = Number(process.env.MAIL_SEND_TIMEOUT_MS || 15000);
 
 export function getNotificationEmail() {
   return process.env.NOTIFICATION_EMAIL || DEFAULT_MAIL_USER;
@@ -23,6 +24,9 @@ export function getMailTransporter() {
   transporterInstance = nodemailer.createTransport({
     service,
     auth: { user, pass },
+    connectionTimeout: MAIL_SEND_TIMEOUT_MS,
+    greetingTimeout: MAIL_SEND_TIMEOUT_MS,
+    socketTimeout: MAIL_SEND_TIMEOUT_MS,
   });
   return transporterInstance;
 }
@@ -34,9 +38,14 @@ export async function safeSendMail(options = {}) {
     return false;
   }
 
-  await transporter.sendMail({
-    from: DEFAULT_MAIL_FROM,
-    ...options,
-  });
+  await Promise.race([
+    transporter.sendMail({
+      from: DEFAULT_MAIL_FROM,
+      ...options,
+    }),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`Mail send timeout after ${MAIL_SEND_TIMEOUT_MS}ms`)), MAIL_SEND_TIMEOUT_MS);
+    }),
+  ]);
   return true;
 }

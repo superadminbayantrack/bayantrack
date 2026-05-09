@@ -343,13 +343,18 @@ router.post('/send-otp', async (req, res) => {
       otp,
       label: 'Registration OTP',
     };
-    await sendUserMail({
+    const sent = await sendUserMail({
       to: normalizedEmail,
       subject: 'Your BayanTrack Registration OTP',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
     });
 
+    if (!sent) {
+      return res.status(503).json({
+        msg: 'OTP email service is currently unavailable. This deployment may be blocking SMTP email sending.',
+      });
+    }
     res.json({ msg: 'OTP sent to email' });
   } catch (err) {
     console.error(err.message);
@@ -1239,12 +1244,18 @@ router.post('/forgot-password', async (req, res) => {
       otp,
       label: 'Password Reset OTP',
     };
-    await sendUserMail({
+    const sent = await sendUserMail({
       to: normalizedEmail,
       subject: 'Password Reset OTP (BayanTrack)',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
     });
+
+    if (!sent) {
+      return res.status(503).json({
+        msg: 'Password reset email service is currently unavailable. This deployment may be blocking SMTP email sending.',
+      });
+    }
 
     res.json({ msg: "OTP sent successfully" });
   } catch (err) {

@@ -11,6 +11,7 @@ type LiveUpdate = { category: string; text: string; module?: string };
 type OtpLoadingState = { active: boolean; title: string; progress: number };
 
 const Login = () => {
+  const OTP_REQUEST_TIMEOUT = 20000;
   const navigate = useNavigate();
   const [view, setView] = useState<ViewState>("login");
   const [showPassword, setShowPassword] = useState(false);
@@ -243,7 +244,7 @@ const Login = () => {
           address: `${registerData.street}, ${registerData.barangay}, ${registerData.city}, ${registerData.province}`,
           addressDetails,
         });
-        await api.post("/api/auth/send-otp", { email: registerData.email });
+        await api.post("/api/auth/send-otp", { email: registerData.email }, { timeout: OTP_REQUEST_TIMEOUT });
         setShowOtpModal(true);
         setFeedback({ isOpen: true, title: "OTP Sent", message: "Please check your email for the verification code.", type: "success" });
       } catch (err: any) {
@@ -259,7 +260,7 @@ const Login = () => {
       }
       try {
         beginOtpLoading("Sending password reset OTP");
-        await api.post("/api/auth/forgot-password", { email: resetData.email });
+        await api.post("/api/auth/forgot-password", { email: resetData.email }, { timeout: OTP_REQUEST_TIMEOUT });
         setFeedback({ isOpen: true, title: "OTP Sent", message: "Please check your email for the verification code.", type: "success" });
         setView("reset");
       } catch (err: any) {
@@ -330,7 +331,7 @@ const Login = () => {
     try {
       setSendingRegisterOtp(true);
       beginOtpLoading("Resending registration OTP");
-      await api.post("/api/auth/send-otp", { email: registerData.email });
+      await api.post("/api/auth/send-otp", { email: registerData.email }, { timeout: OTP_REQUEST_TIMEOUT });
       setFeedback({ isOpen: true, title: "OTP Resent", message: "A new OTP has been sent to your email.", type: "success" });
     } catch (err: any) {
       setFeedback({ isOpen: true, title: "Resend Failed", message: err.response?.data?.msg || "Failed to resend OTP.", type: "error" });
@@ -635,7 +636,7 @@ const Login = () => {
               <form className="mt-6 flex flex-col gap-4 pb-3 sm:mt-8 sm:gap-5 sm:pb-4" onSubmit={handleAction}>
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Username</label>
-                  <input type="text" placeholder="Username" name="username" value={registerData.username} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs outline-none focus:border-blue-500 focus:bg-white" />
+                  <input type="text" placeholder="Username" name="username" autoComplete="username" value={registerData.username} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs outline-none focus:border-blue-500 focus:bg-white" />
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -774,14 +775,14 @@ const Login = () => {
                   <div className="flex flex-col gap-1">
                     <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Password</label>
                     <div className="relative">
-                      <input type={showRegisterPassword ? "text" : "password"} placeholder="Input a password here" name="password" value={registerData.password} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 pr-10 text-xs outline-none focus:border-blue-500 focus:bg-white" />
+                    <input type={showRegisterPassword ? "text" : "password"} placeholder="Input a password here" name="password" autoComplete="new-password" value={registerData.password} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 pr-10 text-xs outline-none focus:border-blue-500 focus:bg-white" />
                       <button type="button" onClick={() => setShowRegisterPassword(!showRegisterPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">{showRegisterPassword ? <EyeOff size={14} /> : <Eye size={14} />}</button>
                     </div>
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Confirm Password</label>
                     <div className="relative">
-                      <input type={showConfirmPassword ? "text" : "password"} placeholder="Confirm your password" name="confirmPassword" value={registerData.confirmPassword} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 pr-10 text-xs outline-none focus:border-blue-500 focus:bg-white" />
+                    <input type={showConfirmPassword ? "text" : "password"} placeholder="Confirm your password" name="confirmPassword" autoComplete="new-password" value={registerData.confirmPassword} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 pr-10 text-xs outline-none focus:border-blue-500 focus:bg-white" />
                       <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">{showConfirmPassword ? <EyeOff size={14} /> : <Eye size={14} />}</button>
                     </div>
                   </div>
