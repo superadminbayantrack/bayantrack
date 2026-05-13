@@ -1,22 +1,41 @@
 import nodemailer from 'nodemailer';
 
-const DEFAULT_MAIL_USER = process.env.MAIL_USER || process.env.NOTIFICATION_EMAIL || 'superadminbayantrack@gmail.com';
-const DEFAULT_MAIL_FROM = process.env.MAIL_FROM || `"BayanTrack" <${DEFAULT_MAIL_USER}>`;
-const DEFAULT_RESEND_FROM = process.env.RESEND_FROM_EMAIL || 'BayanTrack <onboarding@resend.dev>';
+function cleanEnvValue(value) {
+  const trimmed = String(value || '').trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function cleanMailPassword(service, value) {
+  const password = cleanEnvValue(value);
+  if (String(service || '').toLowerCase() === 'gmail') {
+    return password.replace(/\s+/g, '');
+  }
+  return password;
+}
+
+const DEFAULT_MAIL_USER = cleanEnvValue(process.env.MAIL_USER || process.env.NOTIFICATION_EMAIL || 'superadminbayantrack@gmail.com');
+const DEFAULT_MAIL_FROM = cleanEnvValue(process.env.MAIL_FROM || `"BayanTrack" <${DEFAULT_MAIL_USER}>`);
+const DEFAULT_RESEND_FROM = cleanEnvValue(process.env.RESEND_FROM_EMAIL || 'BayanTrack <onboarding@resend.dev>');
 
 let transporterInstance = null;
 const MAIL_SEND_TIMEOUT_MS = Number(process.env.MAIL_SEND_TIMEOUT_MS || 15000);
 
 export function getNotificationEmail() {
-  return process.env.NOTIFICATION_EMAIL || DEFAULT_MAIL_USER;
+  return cleanEnvValue(process.env.NOTIFICATION_EMAIL) || DEFAULT_MAIL_USER;
 }
 
 export function getMailTransporter() {
   if (transporterInstance) return transporterInstance;
 
-  const user = process.env.MAIL_USER || DEFAULT_MAIL_USER;
-  const pass = process.env.MAIL_PASS || '';
-  const service = process.env.MAIL_SERVICE || 'gmail';
+  const service = cleanEnvValue(process.env.MAIL_SERVICE || 'gmail');
+  const user = cleanEnvValue(process.env.MAIL_USER || DEFAULT_MAIL_USER);
+  const pass = cleanMailPassword(service, process.env.MAIL_PASS || '');
 
   if (!user || !pass) {
     return null;
@@ -33,7 +52,7 @@ export function getMailTransporter() {
 }
 
 async function sendWithResend(options = {}) {
-  const apiKey = process.env.RESEND_API_KEY || '';
+  const apiKey = cleanEnvValue(process.env.RESEND_API_KEY || '');
   if (!apiKey) return false;
 
   const controller = new AbortController();
