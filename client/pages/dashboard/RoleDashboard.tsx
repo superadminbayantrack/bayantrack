@@ -1036,44 +1036,65 @@ export default function RoleDashboard({ role }: DashboardProps) {
     const tracker = silent ? null : startSyncProgress("Retrieving data", "Loading the latest dashboard records...");
     try {
       tracker?.update("Reading the latest saved records...", 28);
-      const [usersRes, officialsRes, announcementsRes, reportsRes, servicesRes, messagesRes, subscriptionsRes, activityRes, notificationsRes, settingsRes, contentRes, catalogRes, deptRes, meRes] = await Promise.all([
-        api.get("/api/admin/users", { headers: authHeaders(), params: buildUserQueryParams() }),
-        api.get("/api/officials/all", { headers: authHeaders() }),
-        api.get(canManage ? "/api/announcements/all" : "/api/announcements", { headers: canManage ? authHeaders() : undefined }),
-        api.get("/api/reports", { headers: authHeaders() }),
-        api.get("/api/services/requests", { headers: authHeaders() }),
-        api.get("/api/contact/messages", { headers: authHeaders() }),
-        api.get("/api/subscriptions", { headers: authHeaders() }),
-        api.get("/api/admin/activity", { headers: authHeaders(), params: { date: activityLogDate || todayInputValue() } }),
-        api.get("/api/admin/notifications", { headers: authHeaders(), params: { date: notificationLogDate || todayInputValue() } }),
-        api.get("/api/admin/system-settings", { headers: authHeaders() }),
-        api.get("/api/content/site"),
-        api.get("/api/services/catalog/all", { headers: authHeaders() }),
-        api.get("/api/contact/departments"),
-        api.get("/api/auth/user", { headers: authHeaders() }),
-      ]);
+      const dashboardRequests = [
+        { name: "users", request: api.get("/api/admin/users", { headers: authHeaders(), params: buildUserQueryParams() }) },
+        { name: "officials", request: api.get("/api/officials/all", { headers: authHeaders() }) },
+        { name: "announcements", request: api.get(canManage ? "/api/announcements/all" : "/api/announcements", { headers: canManage ? authHeaders() : undefined }) },
+        { name: "reports", request: api.get("/api/reports", { headers: authHeaders() }) },
+        { name: "service requests", request: api.get("/api/services/requests", { headers: authHeaders() }) },
+        { name: "messages", request: api.get("/api/contact/messages", { headers: authHeaders() }) },
+        { name: "subscribers", request: api.get("/api/subscriptions", { headers: authHeaders() }) },
+        { name: "activity", request: api.get("/api/admin/activity", { headers: authHeaders(), params: { date: activityLogDate || todayInputValue() } }) },
+        { name: "notifications", request: api.get("/api/admin/notifications", { headers: authHeaders(), params: { date: notificationLogDate || todayInputValue() } }) },
+        { name: "system settings", request: api.get("/api/admin/system-settings", { headers: authHeaders() }) },
+        { name: "site content", request: api.get("/api/content/site") },
+        { name: "service catalog", request: api.get("/api/services/catalog/all", { headers: authHeaders() }) },
+        { name: "departments", request: api.get("/api/contact/departments") },
+        { name: "account", request: api.get("/api/auth/user", { headers: authHeaders() }) },
+      ];
+      const results = await Promise.allSettled(dashboardRequests.map((item) => item.request));
+      const readResult = <T,>(index: number, fallback: T): T => {
+        const result = results[index];
+        return result.status === "fulfilled" ? (result.value.data || fallback) : fallback;
+      };
       tracker?.update("Applying fresh data to the dashboard...", 78);
-      setUsers(usersRes.data || []); setOfficials(officialsRes.data || []); setAnnouncements(announcementsRes.data || []);
-      setReports(reportsRes.data || []); setServices(servicesRes.data || []); setMessages(messagesRes.data || []);
-      setSubscriptions(subscriptionsRes.data || []);
-      setActivities(Array.isArray(activityRes.data) ? activityRes.data : activityRes.data?.items || []);
-      setAdminNotifications(notificationsRes.data?.items || []);
-      const nextSettings = { ...systemSettings, ...(settingsRes.data || {}) };
+      setUsers(readResult(0, users));
+      setOfficials(readResult(1, officials));
+      setAnnouncements(readResult(2, announcements));
+      setReports(readResult(3, reports));
+      setServices(readResult(4, services));
+      setMessages(readResult(5, messages));
+      setSubscriptions(readResult(6, subscriptions));
+      const activityData = readResult<any>(7, []);
+      const notificationData = readResult<any>(8, { items: [] });
+      setActivities(Array.isArray(activityData) ? activityData : activityData?.items || activities);
+      setAdminNotifications(notificationData?.items || adminNotifications);
+      const nextSettings = { ...systemSettings, ...(readResult(9, {}) || {}) };
       setSystemSettings(nextSettings);
       setSavedSystemSettings(nextSettings);
-      setSiteContent((p) => ({ ...p, ...(contentRes.data || {}) }));
-      setMyPermissions(normalizeAdminPermissions(meRes.data?.adminPermissions));
-      setServiceCatalog(catalogRes.data || []);
-      setDepartments(deptRes.data || []);
+      setSiteContent((p) => ({ ...p, ...(readResult(10, {}) || {}) }));
+      setMyPermissions(normalizeAdminPermissions(readResult<any>(13, {})?.adminPermissions));
+      setServiceCatalog(readResult(11, serviceCatalog));
+      setDepartments(readResult(12, departments));
       if (canManage) {
-        const [evacRes, hotlineRes] = await Promise.all([
+        const [evacRes, hotlineRes] = await Promise.allSettled([
           api.get("/api/services/evacuation-centers", { headers: authHeaders() }),
           api.get("/api/services/emergency-hotlines", { headers: authHeaders() }),
         ]);
-        setEvacuationCenters(evacRes.data || []);
-        setEmergencyHotlines(hotlineRes.data || []);
+        if (evacRes.status === "fulfilled") setEvacuationCenters(evacRes.value.data || []);
+        if (hotlineRes.status === "fulfilled") setEmergencyHotlines(hotlineRes.value.data || []);
       }
+      const failedSections = results
+        .map((result, index) => result.status === "rejected" ? dashboardRequests[index].name : "")
+        .filter(Boolean);
       tracker?.finish("Dashboard records are up to date.");
+      if (failedSections.length > 0 && !silent) {
+        setFeedback({
+          type: "error",
+          title: "Some sections did not load",
+          message: `Please refresh if needed. Missing: ${failedSections.join(", ")}.`,
+        });
+      }
     } catch (err: any) {
       tracker?.finish("Sync failed. Please try again.");
       if (!silent) {
@@ -1096,6 +1117,53 @@ export default function RoleDashboard({ role }: DashboardProps) {
     } catch (err: any) {
       setFeedback({ type: "error", title: "Load failed", message: err?.response?.data?.msg || "Could not load users." });
     }
+  }
+
+  async function fetchUserDetails(user: UserItem) {
+    try {
+      const res = await api.get(`/api/admin/users/${user._id}`, { headers: authHeaders() });
+      return { ...user, ...(res.data || {}) };
+    } catch (_err) {
+      return user;
+    }
+  }
+
+  async function openSelectedUser(user: UserItem) {
+    setSelectedUser(user);
+    const detailedUser = await fetchUserDetails(user);
+    setSelectedUser((current) => current?._id === user._id ? detailedUser : current);
+  }
+
+  async function fetchReportDetails(report: ReportItem) {
+    try {
+      const res = await api.get(`/api/reports/${report._id}`, { headers: authHeaders() });
+      return { ...report, ...(res.data || {}) };
+    } catch (_err) {
+      return report;
+    }
+  }
+
+  async function openReportManageModal(report: ReportItem) {
+    setReportManageModal(report);
+    const detailedReport = await fetchReportDetails(report);
+    setReportManageModal((current) => current?._id === report._id ? detailedReport : current);
+  }
+
+  async function openReportAttachment(report: ReportItem) {
+    const existingDataUrl = report.attachments?.find((item) => item.dataUrl)?.dataUrl;
+    if (existingDataUrl) {
+      window.open(existingDataUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const detailedReport = await fetchReportDetails(report);
+    const detailedDataUrl = detailedReport.attachments?.find((item) => item.dataUrl)?.dataUrl;
+    if (detailedDataUrl) {
+      window.open(detailedDataUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    setFeedback({ type: "error", title: "Attachment unavailable", message: "The uploaded file could not be opened right now." });
   }
 
   async function runActionWithFeedback(title: string, action: () => Promise<void>) {
@@ -1736,7 +1804,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <td className="px-4 py-3"><Badge value={user.status === "active" ? "approved" : user.status === "suspended" ? "rejected" : "pending"} /></td>
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap gap-2">
-                            <button className={btnSecondary} onClick={() => setSelectedUser(user)} type="button">View Details</button>
+                            <button className={btnSecondary} onClick={() => void openSelectedUser(user)} type="button">View Details</button>
                             {canManage && (
                               <button className={btnSecondary} onClick={() => setUserEditModal({ ...user, password: "" })} type="button">Edit</button>
                             )}
@@ -1949,8 +2017,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
                           <p>{r.description}</p>
                           <p className="mt-2 text-xs text-slate-500">Handled by: {handlerLabel(r)}</p>
                           {r.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{r.adminComment}"</p> : null}
-                          {r.attachments?.[0]?.dataUrl ? (
-                            <button className="mt-2 text-xs font-semibold text-blue-700 underline" onClick={() => window.open(r.attachments?.[0]?.dataUrl, "_blank", "noopener,noreferrer")} type="button">
+                          {r.attachments?.length ? (
+                            <button className="mt-2 text-xs font-semibold text-blue-700 underline" onClick={() => void openReportAttachment(r)} type="button">
                               View attachment
                             </button>
                           ) : null}
@@ -1958,7 +2026,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <td className="px-4 py-3"><Badge value={r.status} /></td>
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap gap-2">
-                            {hasModulePermission("reports", "edit") ? <button className={btnSecondary} onClick={() => setReportManageModal(r)} type="button">Manage</button> : null}
+                            {hasModulePermission("reports", "edit") ? <button className={btnSecondary} onClick={() => void openReportManageModal(r)} type="button">Manage</button> : null}
                             {hasModulePermission("reports", "archive") ? (
                               <button
                                 className={iconBtn}

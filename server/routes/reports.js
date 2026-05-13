@@ -118,10 +118,25 @@ router.post('/', optionalAuth, async (req, res) => {
 
 router.get('/', auth, requireRoles('admin', 'superadmin'), async (_req, res) => {
   try {
-    const reports = await IssueReport.find().sort({ createdAt: -1 }).lean();
+    const reports = await IssueReport.find()
+      .select('-attachments.dataUrl')
+      .sort({ createdAt: -1 })
+      .lean();
     return res.json(reports);
   } catch (err) {
     return res.status(500).json({ msg: 'Failed to fetch reports' });
+  }
+});
+
+router.get('/:id', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
+  try {
+    const report = await IssueReport.findById(req.params.id).lean();
+    if (!report) {
+      return res.status(404).json({ msg: 'Report not found' });
+    }
+    return res.json(report);
+  } catch (_err) {
+    return res.status(400).json({ msg: 'Failed to fetch report details' });
   }
 });
 
@@ -138,7 +153,12 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
       update.status = req.body.status;
       update.adminChecked = req.body.status !== 'new';
     }
-    if (req.body.attachments !== undefined) update.attachments = normalizeAttachments(req.body.attachments);
+    if (req.body.attachments !== undefined) {
+      const normalizedAttachments = normalizeAttachments(req.body.attachments);
+      if (normalizedAttachments.length > 0 || req.body.clearAttachments === true) {
+        update.attachments = normalizedAttachments;
+      }
+    }
 
     const existing = await IssueReport.findById(req.params.id);
     if (!existing) {

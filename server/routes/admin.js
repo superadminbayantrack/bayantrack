@@ -269,10 +269,25 @@ router.get('/users', auth, requireRoles('admin', 'superadmin'), async (req, res)
       query.status = { $ne: 'active' };
     }
 
-    const users = await User.find(query).select('-password').sort({ createdAt: -1 }).lean();
+    const users = await User.find(query)
+      .select('-password -validIdImage -avatarImage -marriageContractImage')
+      .sort({ createdAt: -1 })
+      .lean();
     return res.json(users);
   } catch (err) {
     return res.status(500).json({ msg: 'Failed to fetch users' });
+  }
+});
+
+router.get('/users/:id', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select('-password').lean();
+    if (!user) {
+      return res.status(404).json({ msg: 'User not found' });
+    }
+    return res.json(user);
+  } catch (_err) {
+    return res.status(400).json({ msg: 'Failed to fetch user details' });
   }
 });
 
