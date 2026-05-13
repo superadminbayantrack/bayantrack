@@ -1,5 +1,5 @@
 ﻿
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, FileText, LayoutDashboard, LogOut, Mail, Pencil, RotateCcw, Search, Settings, Shield, Trash2, UserCog, UserX, Users, X } from "lucide-react";
 import { clearAuthSession, type UserRole } from "@/lib/auth";
@@ -25,6 +25,7 @@ type AnnouncementItem = { _id: string; title: string; content?: string; category
 type HandlerInfo = { adminComment?: string; handledByUser?: string | null; handledByName?: string; handledByRole?: string; handledAt?: string; updatedAt?: string; };
 type HandlerOption = { value: string; label: string; category: "Admins" | "Barangay Officials / Staff"; name: string; role: string; userId: string | null };
 type ReportItem = HandlerInfo & { _id: string; fullName?: string; contactNumber?: string; address?: string; category: string; description: string; status: string; referenceNo: string; attachments?: Array<{ name?: string; type?: string; size?: number; dataUrl?: string }>; createdAt?: string; };
+type AttachmentPreview = { title: string; name?: string; type?: string; dataUrl: string };
 type ServiceRequest = HandlerInfo & { _id: string; referenceNo: string; serviceType: string; fullName: string; contactNumber?: string; address?: string; purpose?: string; status: string; createdAt?: string; };
 type ContactMessage = HandlerInfo & { _id: string; referenceNo: string; name: string; contact?: string; department: string; message?: string; status: string; createdAt?: string; };
 type Department = { _id: string; name: string; contactPerson: string; localNumber: string; active?: boolean };
@@ -366,6 +367,34 @@ function handlerLabel(item?: HandlerInfo) {
   return `${item.handledByName}${item.handledByRole ? ` (${item.handledByRole})` : ""}`;
 }
 
+function DetailBlock({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {
+  return (
+    <div className={`rounded-xl border border-slate-200 bg-slate-50/70 p-3 ${className}`}>
+      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">{label}</p>
+      <div className="mt-1 text-sm leading-5 text-slate-800">{children}</div>
+    </div>
+  );
+}
+
+function HandlerPill({ item }: { item?: HandlerInfo }) {
+  return (
+    <span className="inline-flex max-w-full items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 shadow-sm">
+      <span className="mr-1 text-slate-400">Handled by</span>
+      <span className="truncate">{handlerLabel(item)}</span>
+    </span>
+  );
+}
+
+function AdminCommentBlock({ value }: { value?: string }) {
+  if (!value) return null;
+  return (
+    <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-900">
+      <p className="font-bold uppercase tracking-[0.14em] text-blue-500">Comment from admins</p>
+      <p className="mt-1">{value}</p>
+    </div>
+  );
+}
+
 export default function RoleDashboard({ role }: DashboardProps) {
   const navigate = useNavigate();
   const canManage = role === "superadmin";
@@ -424,6 +453,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [manageCentersOpen, setManageCentersOpen] = useState(false);
   const [manageHotlinesOpen, setManageHotlinesOpen] = useState(false);
   const [reportManageModal, setReportManageModal] = useState<ReportItem | null>(null);
+  const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreview | null>(null);
+  const [attachmentLoadingId, setAttachmentLoadingId] = useState<string | null>(null);
   const [serviceManageModal, setServiceManageModal] = useState<ServiceRequest | null>(null);
   const [messageManageModal, setMessageManageModal] = useState<ContactMessage | null>(null);
   const [subscriptionManageModal, setSubscriptionManageModal] = useState<Subscription | null>(null);
@@ -1150,20 +1181,35 @@ export default function RoleDashboard({ role }: DashboardProps) {
   }
 
   async function openReportAttachment(report: ReportItem) {
-    const existingDataUrl = report.attachments?.find((item) => item.dataUrl)?.dataUrl;
-    if (existingDataUrl) {
-      window.open(existingDataUrl, "_blank", "noopener,noreferrer");
+    const existingAttachment = report.attachments?.find((item) => item.dataUrl);
+    if (existingAttachment?.dataUrl) {
+      setAttachmentPreview({
+        title: report.referenceNo,
+        name: existingAttachment.name,
+        type: existingAttachment.type,
+        dataUrl: existingAttachment.dataUrl,
+      });
       return;
     }
 
-    const detailedReport = await fetchReportDetails(report);
-    const detailedDataUrl = detailedReport.attachments?.find((item) => item.dataUrl)?.dataUrl;
-    if (detailedDataUrl) {
-      window.open(detailedDataUrl, "_blank", "noopener,noreferrer");
-      return;
+    setAttachmentLoadingId(report._id);
+    try {
+      const detailedReport = await fetchReportDetails(report);
+      setReportManageModal((current) => current?._id === report._id ? detailedReport : current);
+      const detailedAttachment = detailedReport.attachments?.find((item) => item.dataUrl);
+      if (detailedAttachment?.dataUrl) {
+        setAttachmentPreview({
+          title: detailedReport.referenceNo,
+          name: detailedAttachment.name,
+          type: detailedAttachment.type,
+          dataUrl: detailedAttachment.dataUrl,
+        });
+        return;
+      }
+      setFeedback({ type: "error", title: "Attachment unavailable", message: "The uploaded file could not be opened right now." });
+    } finally {
+      setAttachmentLoadingId(null);
     }
-
-    setFeedback({ type: "error", title: "Attachment unavailable", message: "The uploaded file could not be opened right now." });
   }
 
   async function runActionWithFeedback(title: string, action: () => Promise<void>) {
@@ -1564,14 +1610,16 @@ export default function RoleDashboard({ role }: DashboardProps) {
               const activeGroup = item.children.some((child) => child.id === activePanel);
               return (
                 <div key={item.label} className="mb-1">
-                  <button className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${activeGroup ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-100"}`} onClick={() => item.setOpen(!item.open)} type="button">
-                    {item.icon}<span className="min-w-0 flex-1">{item.label}</span><ChevronDown size={15} className={`transition ${item.open ? "rotate-180" : ""}`} />
+                  <button className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-all duration-300 ease-out ${activeGroup ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-100"}`} onClick={() => item.setOpen(!item.open)} type="button">
+                    {item.icon}<span className="min-w-0 flex-1">{item.label}</span><ChevronDown size={15} className={`transition-transform duration-300 ease-out ${item.open ? "rotate-180" : ""}`} />
                   </button>
-                  {item.open ? (
-                    <div className="ml-4 mt-1 space-y-1 border-l border-slate-200 pl-2">
-                      {item.children.map((child) => <button key={child.id} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${activePanel === child.id ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"}`} onClick={() => { setActivePanel(child.id); setIsMenuOpen(false); }} type="button">{child.icon}<span className="min-w-0">{child.label}</span></button>)}
+                  <div className={`grid transition-all duration-300 ease-out ${item.open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}>
+                    <div className="overflow-hidden">
+                      <div className="ml-4 mt-1 space-y-1 border-l border-slate-200 pl-2">
+                        {item.children.map((child) => <button key={child.id} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-all duration-200 ease-out ${activePanel === child.id ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"}`} onClick={() => { setActivePanel(child.id); setIsMenuOpen(false); }} type="button">{child.icon}<span className="min-w-0">{child.label}</span></button>)}
+                      </div>
                     </div>
-                  ) : null}
+                  </div>
                 </div>
               );
             })}
@@ -1623,7 +1671,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               return (
                 <div key={item.label} className="space-y-1">
                   <button
-                    className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition ${activeGroup ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-100"}`}
+                    className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-300 ease-out ${activeGroup ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-100"}`}
                     onClick={() => item.setOpen(!item.open)}
                     type="button"
                     title={item.label}
@@ -1631,10 +1679,10 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   >
                     <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">{item.icon}</span>
                     {!isSidebarCollapsed ? <span className="min-w-0 flex-1 truncate text-left">{item.label}</span> : null}
-                    {!isSidebarCollapsed ? <ChevronDown size={15} className={`transition ${item.open ? "rotate-180" : ""}`} /> : null}
+                    {!isSidebarCollapsed ? <ChevronDown size={15} className={`transition-transform duration-300 ease-out ${item.open ? "rotate-180" : ""}`} /> : null}
                   </button>
-                  {(item.open || isSidebarCollapsed) ? (
-                    <div className={`${isSidebarCollapsed ? "space-y-1" : "ml-5 space-y-1 border-l border-slate-200 pl-3"}`}>
+                  {isSidebarCollapsed ? (
+                    <div className="space-y-1">
                       {item.children.map((child) => {
                         const active = activePanel === child.id;
                         return (
@@ -1652,7 +1700,30 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         );
                       })}
                     </div>
-                  ) : null}
+                  ) : (
+                    <div className={`grid transition-all duration-300 ease-out ${item.open ? "grid-rows-[1fr] opacity-100 translate-y-0" : "grid-rows-[0fr] -translate-y-1 opacity-0"}`}>
+                      <div className="overflow-hidden">
+                        <div className="ml-5 space-y-1 border-l border-slate-200 pl-3">
+                          {item.children.map((child) => {
+                            const active = activePanel === child.id;
+                            return (
+                              <button
+                                key={child.id}
+                                className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ease-out ${active ? "bg-slate-900 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100"}`}
+                                onClick={() => { setActivePanel(child.id); setIsMenuOpen(false); }}
+                                type="button"
+                                title={child.label}
+                                aria-label={child.label}
+                              >
+                                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">{child.icon}</span>
+                                <span className="min-w-0 truncate">{child.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -2014,14 +2085,25 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(r.createdAt)}</td>
                         <td className="px-4 py-3 text-slate-700">{r.category}</td>
                         <td className="px-4 py-3 text-slate-600">
-                          <p>{r.description}</p>
-                          <p className="mt-2 text-xs text-slate-500">Handled by: {handlerLabel(r)}</p>
-                          {r.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{r.adminComment}"</p> : null}
-                          {r.attachments?.length ? (
-                            <button className="mt-2 text-xs font-semibold text-blue-700 underline" onClick={() => void openReportAttachment(r)} type="button">
-                              View attachment
-                            </button>
-                          ) : null}
+                          <div className="min-w-[280px] space-y-2">
+                            <DetailBlock label="Details">
+                              <p className="font-medium">{r.description || "No details provided."}</p>
+                            </DetailBlock>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <HandlerPill item={r} />
+                              {r.attachments?.length ? (
+                                <button
+                                  className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 transition-all duration-200 ease-out hover:border-blue-200 hover:bg-blue-100 disabled:cursor-wait disabled:opacity-70"
+                                  disabled={attachmentLoadingId === r._id}
+                                  onClick={() => void openReportAttachment(r)}
+                                  type="button"
+                                >
+                                  {attachmentLoadingId === r._id ? "Loading attachment..." : "View attachment"}
+                                </button>
+                              ) : null}
+                            </div>
+                            <AdminCommentBlock value={r.adminComment} />
+                          </div>
                         </td>
                         <td className="px-4 py-3"><Badge value={r.status} /></td>
                         <td className="px-4 py-3">
@@ -2083,9 +2165,14 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(s.createdAt)}</td>
                         <td className="px-4 py-3 text-slate-700">{s.serviceType}</td>
                         <td className="px-4 py-3 text-slate-600">
-                          <p>{s.fullName}</p>
-                          <p className="mt-2 text-xs text-slate-500">Handled by: {handlerLabel(s)}</p>
-                          {s.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{s.adminComment}"</p> : null}
+                          <div className="min-w-[260px] space-y-2">
+                            <DetailBlock label="Resident">
+                              <p className="font-semibold">{s.fullName}</p>
+                              {s.purpose ? <p className="mt-1 text-xs text-slate-500">Purpose: {s.purpose}</p> : null}
+                            </DetailBlock>
+                            <HandlerPill item={s} />
+                            <AdminCommentBlock value={s.adminComment} />
+                          </div>
                         </td>
                         <td className="px-4 py-3"><Badge value={s.status} /></td>
                         <td className="px-4 py-3">
@@ -2139,9 +2226,14 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <td className="px-4 py-3 font-semibold text-slate-900">{m.referenceNo}</td>
                         <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(m.createdAt)}</td>
                         <td className="px-4 py-3 text-slate-700">
-                          <p>{m.name}</p>
-                          <p className="mt-2 text-xs text-slate-500">Handled by: {handlerLabel(m)}</p>
-                          {m.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{m.adminComment}"</p> : null}
+                          <div className="min-w-[260px] space-y-2">
+                            <DetailBlock label="Sender">
+                              <p className="font-semibold">{m.name}</p>
+                              {m.message ? <p className="mt-1 text-xs text-slate-500">{m.message}</p> : null}
+                            </DetailBlock>
+                            <HandlerPill item={m} />
+                            <AdminCommentBlock value={m.adminComment} />
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-slate-600">{m.department}</td>
                         <td className="px-4 py-3"><Badge value={m.status} /></td>
@@ -2198,9 +2290,13 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     {filteredSubscriptions.map((sub) => (
                       <tr key={sub._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">
-                          <p>{sub.email}</p>
-                          <p className="mt-2 text-xs font-normal text-slate-500">Handled by: {handlerLabel(sub)}</p>
-                          {sub.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{sub.adminComment}"</p> : null}
+                          <div className="min-w-[260px] space-y-2">
+                            <DetailBlock label="Subscriber">
+                              <p className="break-all font-semibold">{sub.email}</p>
+                            </DetailBlock>
+                            <HandlerPill item={sub} />
+                            <AdminCommentBlock value={sub.adminComment} />
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(sub.createdAt)}</td>
                         <td className="px-4 py-3 text-slate-600">{sub.source || "homepage"}</td>
@@ -3048,7 +3144,16 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Description"><textarea className={inputBase} rows={3} value={reportManageModal.description} onChange={(e) => setReportManageModal((p) => p ? { ...p, description: e.target.value } : p)} /></LabeledField>
               <LabeledField label='Comment from the admins'><textarea className={inputBase} rows={3} placeholder="Resident-facing update or action taken" value={reportManageModal.adminComment || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, adminComment: e.target.value } : p)} /></LabeledField>
               {renderHandlerSelect(reportManageModal, setReportManageModal)}
-              {reportManageModal.attachments?.[0]?.dataUrl ? <button className={btnSecondary} onClick={() => window.open(reportManageModal.attachments?.[0]?.dataUrl, "_blank", "noopener,noreferrer")} type="button">View Attachment</button> : null}
+              {reportManageModal.attachments?.length ? (
+                <button
+                  className={btnSecondary}
+                  disabled={attachmentLoadingId === reportManageModal._id}
+                  onClick={() => void openReportAttachment(reportManageModal)}
+                  type="button"
+                >
+                  {attachmentLoadingId === reportManageModal._id ? "Loading Attachment..." : "View Attachment"}
+                </button>
+              ) : null}
               <LabeledField label="Status">
                 <select className={inputBase} value={reportManageModal.status} onChange={(e) => setReportManageModal((p) => p ? { ...p, status: e.target.value } : p)}>
                   <option value="new">new</option>
@@ -3059,6 +3164,42 @@ export default function RoleDashboard({ role }: DashboardProps) {
               </LabeledField>
             </div>
             <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Update Report", message: "Save report changes?", confirmLabel: "Save", run: () => saveManagedReport(reportManageModal) })} type="button">Save Report</button>
+          </div>
+        </div>
+      )}
+
+      {attachmentPreview && (
+        <div className={modalOverlay}>
+          <div className={`${modalCard} max-w-5xl`}>
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Attachment Preview</p>
+                <h3 className="mt-1 text-lg font-bold text-slate-900">{attachmentPreview.title}</h3>
+                <p className="mt-1 text-sm text-slate-500">{attachmentPreview.name || attachmentPreview.type || "Uploaded file"}</p>
+              </div>
+              <button className={iconBtn} onClick={() => setAttachmentPreview(null)} type="button" title="Close attachment" aria-label="Close attachment">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-950 p-3">
+              {attachmentPreview.type?.startsWith("image/") || attachmentPreview.dataUrl.startsWith("data:image/") ? (
+                <img
+                  alt={attachmentPreview.name || "Report attachment"}
+                  className="mx-auto max-h-[65vh] w-auto rounded-xl object-contain"
+                  src={attachmentPreview.dataUrl}
+                />
+              ) : (
+                <iframe
+                  className="h-[65vh] w-full rounded-xl bg-white"
+                  src={attachmentPreview.dataUrl}
+                  title={attachmentPreview.name || "Report attachment"}
+                />
+              )}
+            </div>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <a className={btnSecondary} href={attachmentPreview.dataUrl} rel="noopener noreferrer" target="_blank">Open Full Size</a>
+              <button className={btnPrimary} onClick={() => setAttachmentPreview(null)} type="button">Done</button>
+            </div>
           </div>
         </div>
       )}
@@ -3142,10 +3283,15 @@ export default function RoleDashboard({ role }: DashboardProps) {
                       <td className="px-4 py-3 font-semibold text-slate-900">{m.referenceNo}</td>
                       <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(m.updatedAt || m.createdAt)}</td>
                       <td className="px-4 py-3 text-slate-700">
-                        <p>{m.name}</p>
-                        <p className="mt-1 text-xs text-slate-500">{m.department}</p>
-                        <p className="mt-1 text-xs text-slate-500">Handled by: {handlerLabel(m)}</p>
-                        {m.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{m.adminComment}"</p> : null}
+                        <div className="min-w-[260px] space-y-2">
+                          <DetailBlock label="Closed Message">
+                            <p className="font-semibold">{m.name}</p>
+                            <p className="mt-1 text-xs text-slate-500">{m.department}</p>
+                            {m.message ? <p className="mt-1 text-xs text-slate-500">{m.message}</p> : null}
+                          </DetailBlock>
+                          <HandlerPill item={m} />
+                          <AdminCommentBlock value={m.adminComment} />
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-2">
