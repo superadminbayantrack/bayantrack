@@ -4,6 +4,7 @@ import { Chatbot } from "@/components/Chatbot";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { api, authHeaders } from "@/lib/api";
+import { clearAuthSession } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import { Reveal } from "@/components/Reveal";
 import { FeedbackModal } from "@/components/FeedbackModal";
@@ -157,8 +158,8 @@ export default function ProfileSettings() {
       setActivities(Array.isArray(activityRes.data) ? activityRes.data : activityRes.data?.items || []);
     } catch (err: any) {
       if (err.response?.status === 401) {
-        localStorage.removeItem("token");
-        navigate("/");
+        clearAuthSession();
+        navigate("/login");
       }
     }
   };

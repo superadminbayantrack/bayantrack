@@ -5,6 +5,7 @@ import { LogoutConfirmation } from '@/components/LogoutConfirmation';
 import { Button } from "@/components/ui/button";
 import { User, ChevronDown, Menu, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { clearAuthSession, getToken } from "@/lib/auth";
 import { api } from "@/lib/api";
 import {
   DropdownMenu,
@@ -27,7 +28,7 @@ export function Header() {
 
   React.useEffect(() => {
     const fetchUser = async () => {
-      const token = localStorage.getItem("token");
+      const token = getToken();
       if (token) {
         try {
           const res = await api.get("/api/auth/user", {
@@ -44,7 +45,7 @@ export function Header() {
 
   React.useEffect(() => {
     const fetchNotifications = async () => {
-      const token = localStorage.getItem("token");
+      const token = getToken();
       if (!token) return;
       try {
         const res = await api.get("/api/auth/notifications", {
@@ -103,9 +104,9 @@ export function Header() {
   const confirmLogout = () => {
     setIsLoggingOut(true);
     setTimeout(() => {
-      localStorage.removeItem("token");
+      clearAuthSession();
       setUser(null);
-      navigate("/");
+      navigate("/login");
     }, 3000);
   };
 

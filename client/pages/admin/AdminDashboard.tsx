@@ -1,13 +1,14 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users, FileText, LogOut, LayoutDashboard } from 'lucide-react';
+import { clearAuthSession } from '@/lib/auth';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    navigate('/');
+    clearAuthSession();
+    navigate('/login');
   };
 
   return (

@@ -1,13 +1,14 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Settings, LogOut, Database, UserPlus } from 'lucide-react';
+import { clearAuthSession } from './lib/auth';
 
 export default function SuperAdminDashboard() {
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    navigate('/');
+    clearAuthSession();
+    navigate('/login');
   };
 
   return (

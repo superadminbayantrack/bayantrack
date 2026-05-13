@@ -11,7 +11,7 @@ const ProtectedRoute = ({ children, allowedRoles }: Props) => {
   const role = getRole();
 
   if (!token) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/login" replace />;
   }
 
   if (!hasAllowedRole(role, allowedRoles)) {

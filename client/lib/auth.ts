@@ -2,6 +2,23 @@ export type UserRole = "resident" | "admin" | "superadmin";
 
 const ROLE_KEY = "role";
 const TOKEN_KEY = "token";
+let activeToken: string | null = null;
+let activeRole: UserRole | null = null;
+
+function clearPersistentAuthStorage() {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(ROLE_KEY);
+    window.sessionStorage.removeItem(TOKEN_KEY);
+    window.sessionStorage.removeItem(ROLE_KEY);
+  } catch (_err) {
+    // Storage can be unavailable in private or restricted browser contexts.
+  }
+}
+
+clearPersistentAuthStorage();
 
 export function normalizeRole(value: unknown): UserRole | null {
   const role = String(value || "").trim().toLowerCase();
@@ -12,21 +29,23 @@ export function normalizeRole(value: unknown): UserRole | null {
 }
 
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  return activeToken;
 }
 
 export function getRole(): UserRole | null {
-  return normalizeRole(localStorage.getItem(ROLE_KEY));
+  return activeRole;
 }
 
 export function setAuthSession(token: string, role: UserRole) {
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(ROLE_KEY, role);
+  activeToken = token;
+  activeRole = role;
+  clearPersistentAuthStorage();
 }
 
 export function clearAuthSession() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(ROLE_KEY);
+  activeToken = null;
+  activeRole = null;
+  clearPersistentAuthStorage();
 }
 
 export function getRoleHome(role: UserRole | null): string {

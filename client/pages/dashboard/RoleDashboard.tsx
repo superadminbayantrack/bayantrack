@@ -1191,7 +1191,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     setSubscriptionManageModal(null);
   }
 
-  function confirmLogout() { setIsLoggingOut(true); setTimeout(() => { clearAuthSession(); navigate("/"); }, 3000); }
+  function confirmLogout() { setIsLoggingOut(true); setTimeout(() => { clearAuthSession(); navigate("/login"); }, 3000); }
 
   function fileToBase64(file: File, cb: (value: string) => void) {
     const reader = new FileReader();

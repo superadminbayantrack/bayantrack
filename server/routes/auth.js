@@ -26,6 +26,7 @@ const ALLOWED_SUBDIVISIONS = [
   'niog',
   'talaba',
 ];
+const OTP_EMAIL_UNAVAILABLE_MESSAGE = 'OTP email service is currently unavailable. Check the Vercel email environment variables.';
 
 function normalizeText(value) {
   return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -371,8 +372,9 @@ router.post('/send-otp', async (req, res) => {
     });
 
     if (!sent) {
+      await Otp.deleteOne({ email: normalizedEmail });
       return res.status(503).json({
-        msg: 'OTP email service is currently unavailable. This deployment may be blocking SMTP email sending.',
+        msg: OTP_EMAIL_UNAVAILABLE_MESSAGE,
       });
     }
     res.json({ msg: 'OTP sent to email' });
@@ -926,12 +928,17 @@ router.post('/change-email/request-otp', auth, async (req, res) => {
       label: 'Email Change OTP',
       details: [{ label: 'New Email', value: normalizedNewEmail }],
     };
-    await sendUserMail({
+    const sent = await sendUserMail({
       to: normalizedNewEmail,
       subject: 'Confirm Email Change (BayanTrack OTP)',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
     });
+
+    if (!sent) {
+      await Otp.deleteOne({ email: normalizedNewEmail });
+      return res.status(503).json({ msg: OTP_EMAIL_UNAVAILABLE_MESSAGE });
+    }
 
     return res.json({ msg: 'OTP sent to new email.' });
   } catch (err) {
@@ -963,12 +970,17 @@ router.post('/change-password/request-otp', auth, async (req, res) => {
       otp,
       label: 'Password Change OTP',
     };
-    await sendUserMail({
+    const sent = await sendUserMail({
       to: user.email,
       subject: 'Confirm Password Change (BayanTrack OTP)',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
     });
+
+    if (!sent) {
+      await Otp.deleteOne({ email: user.email });
+      return res.status(503).json({ msg: OTP_EMAIL_UNAVAILABLE_MESSAGE });
+    }
 
     return res.json({ msg: 'OTP sent to your registered email.' });
   } catch (err) {
@@ -1017,12 +1029,17 @@ router.post('/child-access/request-otp', auth, async (req, res) => {
         { label: 'Relationship', value: child.relationship || 'Child' },
       ],
     };
-    await sendUserMail({
+    const sent = await sendUserMail({
       to: user.email,
       subject: 'Confirm Child Access Request (BayanTrack OTP)',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
     });
+
+    if (!sent) {
+      await Otp.deleteOne({ email: user.email });
+      return res.status(503).json({ msg: OTP_EMAIL_UNAVAILABLE_MESSAGE });
+    }
 
     return res.json({ msg: 'OTP sent to your registered email.' });
   } catch (err) {
@@ -1157,12 +1174,17 @@ router.post('/child-session/request-otp', auth, async (req, res) => {
         { label: 'Child Email', value: nextEmail },
       ],
     };
-    await sendUserMail({
+    const sent = await sendUserMail({
       to: user.email,
       subject: 'Confirm Child Profile Update (BayanTrack OTP)',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
     });
+
+    if (!sent) {
+      await Otp.deleteOne({ email: user.email });
+      return res.status(503).json({ msg: OTP_EMAIL_UNAVAILABLE_MESSAGE });
+    }
 
     return res.json({ msg: 'OTP sent to parent email.' });
   } catch (err) {
@@ -1283,8 +1305,9 @@ router.post('/forgot-password', async (req, res) => {
     });
 
     if (!sent) {
+      await Otp.deleteOne({ email: normalizedEmail });
       return res.status(503).json({
-        msg: 'Password reset email service is currently unavailable. This deployment may be blocking SMTP email sending.',
+        msg: OTP_EMAIL_UNAVAILABLE_MESSAGE,
       });
     }
 
