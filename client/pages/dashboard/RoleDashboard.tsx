@@ -376,7 +376,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<Panel>("overview");
-  const [usersNavOpen, setUsersNavOpen] = useState(true);
+  const [managementNavOpen, setManagementNavOpen] = useState(true);
   const [systemNavOpen, setSystemNavOpen] = useState(true);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -1331,21 +1331,21 @@ export default function RoleDashboard({ role }: DashboardProps) {
     { kind: "item", id: "overview", label: "Dashboard", icon: <LayoutDashboard size={16} /> },
     {
       kind: "group",
-      label: "Users",
+      label: "Management",
       icon: <Users size={16} />,
-      open: usersNavOpen,
-      setOpen: setUsersNavOpen,
+      open: managementNavOpen,
+      setOpen: setManagementNavOpen,
       children: [
         { id: "users", label: "Users", icon: <Users size={16} /> },
         { id: "officials", label: "Officials", icon: <Building2 size={16} /> },
+        { id: "announcements", label: "Announcements", icon: <Bell size={16} /> },
+        { id: "reports", label: "Reports", icon: <AlertTriangle size={16} /> },
+        { id: "services", label: "Service Requests", icon: <FileText size={16} /> },
+        { id: "messages", label: "Messages", icon: <Mail size={16} /> },
+        { id: "subscriptions", label: "Subscribers", icon: <Mail size={16} /> },
+        { id: "restore", label: "Restore Data", icon: <Archive size={16} /> },
       ],
     },
-    { kind: "item", id: "announcements", label: "Announcements", icon: <Bell size={16} /> },
-    { kind: "item", id: "reports", label: "Reports", icon: <AlertTriangle size={16} /> },
-    { kind: "item", id: "services", label: "Service Requests", icon: <FileText size={16} /> },
-    { kind: "item", id: "messages", label: "Messages", icon: <Mail size={16} /> },
-    { kind: "item", id: "subscriptions", label: "Subscribers", icon: <Mail size={16} /> },
-    { kind: "item", id: "restore", label: "Restore Data", icon: <Archive size={16} /> },
     {
       kind: "group",
       label: "System Settings",
