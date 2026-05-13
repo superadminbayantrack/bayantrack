@@ -1,7 +1,7 @@
 ﻿
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Archive, Bell, Building2, Check, CircleUserRound, ClipboardCheck, FileText, LayoutDashboard, LogOut, Mail, Pencil, RotateCcw, Search, Settings, Shield, Trash2, UserCog, UserX, Users, X } from "lucide-react";
+import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, FileText, LayoutDashboard, LogOut, Mail, Pencil, RotateCcw, Search, Settings, Shield, Trash2, UserCog, UserX, Users, X } from "lucide-react";
 import { clearAuthSession, type UserRole } from "@/lib/auth";
 import { api, authHeaders } from "@/lib/api";
 import { LogoutConfirmation } from "@/components/LogoutConfirmation";
@@ -22,13 +22,14 @@ type AdminPermissions = {
 type UserItem = { _id: string; username: string; firstName?: string; middleName?: string; lastName?: string; email: string; contactNumber?: string; address?: string; addressDetails?: { blk?: string; lot?: string; street?: string; subdivision?: string; barangay?: string; city?: string; province?: string; zipCode?: string; }; preferredContactMethod?: string; gender?: string; civilStatus?: string; marriageContractImage?: string; children?: Array<{ _id?: string; fullName?: string; email?: string; birthDate?: string; relationship?: string; status?: "pending" | "approved" | "rejected"; reviewReason?: string }>; role: string; status: "active" | "pending" | "suspended"; statusReason?: string; validIdType?: string; validIdStatus?: string; validIdImage?: string; avatarImage?: string; createdAt?: string; adminPermissions?: Partial<AdminPermissions>; };
 type Official = { _id: string; name: string; role: string; level: "city" | "barangay"; rankOrder: number; committee?: string; description?: string; image?: string; active?: boolean; };
 type AnnouncementItem = { _id: string; title: string; content?: string; category: string; module: string; source?: string; image?: string; archived?: boolean; createdAt?: string; };
-type ReportItem = { _id: string; fullName?: string; contactNumber?: string; address?: string; category: string; description: string; status: string; referenceNo: string; attachments?: Array<{ name?: string; type?: string; size?: number; dataUrl?: string }>; createdAt?: string; };
-type ServiceRequest = { _id: string; referenceNo: string; serviceType: string; fullName: string; contactNumber?: string; address?: string; purpose?: string; status: string; createdAt?: string; };
-type ContactMessage = { _id: string; referenceNo: string; name: string; contact?: string; department: string; message?: string; status: string; createdAt?: string; };
+type HandlerInfo = { adminComment?: string; handledByName?: string; handledByRole?: string; handledAt?: string; updatedAt?: string; };
+type ReportItem = HandlerInfo & { _id: string; fullName?: string; contactNumber?: string; address?: string; category: string; description: string; status: string; referenceNo: string; attachments?: Array<{ name?: string; type?: string; size?: number; dataUrl?: string }>; createdAt?: string; };
+type ServiceRequest = HandlerInfo & { _id: string; referenceNo: string; serviceType: string; fullName: string; contactNumber?: string; address?: string; purpose?: string; status: string; createdAt?: string; };
+type ContactMessage = HandlerInfo & { _id: string; referenceNo: string; name: string; contact?: string; department: string; message?: string; status: string; createdAt?: string; };
 type Department = { _id: string; name: string; contactPerson: string; localNumber: string; active?: boolean };
 type EvacuationCenter = { _id: string; name: string; address: string; active: boolean; capacity?: number; hazardsCovered?: string[]; notes?: string; location: { lat: number; lng: number } };
 type EmergencyHotline = { _id: string; name: string; type: string; number: string; desc?: string; when?: string[]; prepare?: string[]; active?: boolean };
-type Subscription = { _id: string; email: string; status: "active" | "unsubscribed"; source?: string; createdAt?: string; };
+type Subscription = HandlerInfo & { _id: string; email: string; status: "active" | "unsubscribed"; source?: string; createdAt?: string; };
 type ActivityItem = {
   _id: string;
   title: string;
@@ -302,7 +303,7 @@ function SyncProgressOverlay({ state }: { state: SyncOverlayState }) {
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
         <div className="mb-4">
-          <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Database Sync</p>
+          <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Saving Progress</p>
           <h3 className="mt-1 text-lg font-bold text-slate-900">{state.title}</h3>
           <p className="mt-1 text-sm text-slate-500">{state.message}</p>
         </div>
@@ -313,7 +314,7 @@ function SyncProgressOverlay({ state }: { state: SyncOverlayState }) {
           />
         </div>
         <div className="mt-2 flex items-center justify-between text-xs font-semibold text-slate-500">
-          <span>Syncing system and database</span>
+          <span>Updating your latest records</span>
           <span>{Math.round(state.progress)}%</span>
         </div>
       </div>
@@ -346,6 +347,24 @@ function todayInputValue() {
   return toLocalDateInputValue(new Date().toISOString());
 }
 
+function formatDateTime(value?: string) {
+  if (!value) return "No date";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No date";
+  return date.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function handlerLabel(item?: HandlerInfo) {
+  if (!item?.handledByName) return "Not assigned yet";
+  return `${item.handledByName}${item.handledByRole ? ` (${item.handledByRole})` : ""}`;
+}
+
 export default function RoleDashboard({ role }: DashboardProps) {
   const navigate = useNavigate();
   const canManage = role === "superadmin";
@@ -356,6 +375,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<Panel>("overview");
+  const [usersNavOpen, setUsersNavOpen] = useState(true);
+  const [systemNavOpen, setSystemNavOpen] = useState(true);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
@@ -423,6 +444,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [reportCategory, setReportCategory] = useState("all");
   const [notificationCategory, setNotificationCategory] = useState("all");
   const [restoreCategory, setRestoreCategory] = useState("users");
+  const [reportSortOrder, setReportSortOrder] = useState<"newest" | "oldest">("newest");
+  const [serviceSortOrder, setServiceSortOrder] = useState<"newest" | "oldest">("newest");
   const [restoreExpanded, setRestoreExpanded] = useState(false);
   const [restoreSearch, setRestoreSearch] = useState("");
   const [notificationSearch, setNotificationSearch] = useState("");
@@ -473,7 +496,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
       { title: "Citizen Reporting", description: "Active channels for feedback, complaints, and emergency reporting via BayanTrack+." },
     ],
     servicesHeroTitle: "Online Services Portal",
-    servicesHeroSubtitle: "Certificate of Indigency, Barangay Clearance, and Barangay ID requests with real database tracking.",
+    servicesHeroSubtitle: "Certificate of Indigency, Barangay Clearance, and Barangay ID requests with clear request tracking.",
     emergencyHotlinesTitle: "Emergency Hotlines",
     emergencyHotlinesSubtitle: "Keep these numbers saved. Know what to do before you call.",
     officialsPageTitle: "Barangay Officials Directory",
@@ -888,19 +911,35 @@ export default function RoleDashboard({ role }: DashboardProps) {
     [officials, officialCategory, normalizedSearch],
   );
   const filteredMessages = useMemo(
-    () => messages.filter((m) => m.status !== "closed" && matchesMessageCategory(m.department, messageCategory) && matchesDashboardSearch(m.referenceNo, m.name, m.department, m.status) && matchesTableFilters("messages", m.createdAt, m.referenceNo, m.name, m.contact, m.department, m.message, m.status)),
+    () => messages.filter((m) => m.status !== "closed" && matchesMessageCategory(m.department, messageCategory) && matchesDashboardSearch(m.referenceNo, m.name, m.department, m.status, m.adminComment, m.handledByName) && matchesTableFilters("messages", m.createdAt, m.referenceNo, m.name, m.contact, m.department, m.message, m.status, m.adminComment, m.handledByName)),
+    [messages, messageCategory, normalizedSearch, tableFilters],
+  );
+  const closedMessages = useMemo(
+    () => messages
+      .filter((m) => m.status === "closed" && matchesMessageCategory(m.department, messageCategory) && matchesDashboardSearch(m.referenceNo, m.name, m.department, m.status, m.adminComment, m.handledByName) && matchesTableFilters("messages", m.createdAt, m.referenceNo, m.name, m.contact, m.department, m.message, m.status, m.adminComment, m.handledByName))
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime()),
     [messages, messageCategory, normalizedSearch, tableFilters],
   );
   const filteredServices = useMemo(
-    () => services.filter((s) => s.status !== "rejected" && matchesServiceCategory(s.serviceType, serviceCategory) && matchesDashboardSearch(s.referenceNo, s.serviceType, s.fullName, s.status) && matchesTableFilters("services", s.createdAt, s.referenceNo, s.serviceType, s.fullName, s.contactNumber, s.address, s.purpose, s.status)),
-    [services, serviceCategory, normalizedSearch, tableFilters],
+    () => services
+      .filter((s) => s.status !== "rejected" && matchesServiceCategory(s.serviceType, serviceCategory) && matchesDashboardSearch(s.referenceNo, s.serviceType, s.fullName, s.status, s.adminComment, s.handledByName) && matchesTableFilters("services", s.createdAt, s.referenceNo, s.serviceType, s.fullName, s.contactNumber, s.address, s.purpose, s.status, s.adminComment, s.handledByName))
+      .sort((a, b) => {
+        const diff = new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        return serviceSortOrder === "newest" ? diff : -diff;
+      }),
+    [services, serviceCategory, normalizedSearch, tableFilters, serviceSortOrder],
   );
   const filteredReports = useMemo(
-    () => reports.filter((r) => r.status !== "rejected" && matchesReportCategory(r.category, reportCategory) && matchesDashboardSearch(r.referenceNo, r.category, r.description, r.status) && matchesTableFilters("reports", r.createdAt, r.referenceNo, r.fullName, r.contactNumber, r.address, r.category, r.description, r.status)),
-    [reports, reportCategory, normalizedSearch, tableFilters],
+    () => reports
+      .filter((r) => r.status !== "rejected" && matchesReportCategory(r.category, reportCategory) && matchesDashboardSearch(r.referenceNo, r.category, r.description, r.status, r.adminComment, r.handledByName) && matchesTableFilters("reports", r.createdAt, r.referenceNo, r.fullName, r.contactNumber, r.address, r.category, r.description, r.status, r.adminComment, r.handledByName))
+      .sort((a, b) => {
+        const diff = new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        return reportSortOrder === "newest" ? diff : -diff;
+      }),
+    [reports, reportCategory, normalizedSearch, tableFilters, reportSortOrder],
   );
   const filteredSubscriptions = useMemo(
-    () => subscriptions.filter((s) => s.status !== "unsubscribed" && (subscriberCategory === "all" || s.status === subscriberCategory) && matchesDashboardSearch(s.email, s.source, s.status) && matchesTableFilters("subscriptions", s.createdAt, s.email, s.source, s.status)),
+    () => subscriptions.filter((s) => s.status !== "unsubscribed" && (subscriberCategory === "all" || s.status === subscriberCategory) && matchesDashboardSearch(s.email, s.source, s.status, s.adminComment, s.handledByName) && matchesTableFilters("subscriptions", s.createdAt, s.email, s.source, s.status, s.adminComment, s.handledByName)),
     [subscriptions, subscriberCategory, normalizedSearch, tableFilters],
   );
   const filteredActivities = useMemo(
@@ -972,7 +1011,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
         if (typeof nextProgress === "number") progress = Math.max(progress, Math.min(96, nextProgress));
         setSyncOverlay((prev) => ({ ...prev, isOpen: true, title, message: nextMessage, progress }));
       },
-      finish(finalMessage = "System and database are synced.") {
+      finish(finalMessage = "Records are up to date.") {
         window.clearInterval(timer);
         setSyncOverlay((prev) => ({ ...prev, isOpen: true, message: finalMessage, progress: 100 }));
         window.setTimeout(() => {
@@ -988,13 +1027,13 @@ export default function RoleDashboard({ role }: DashboardProps) {
     if (value.includes("restore") || value.includes("restored")) return "Restoring data";
     if (value.includes("create") || value.includes("created") || value.includes("added")) return "Saving new data";
     if (value.includes("update") || value.includes("updated") || value.includes("save")) return "Saving changes";
-    return "Syncing data";
+    return "Updating data";
   }
 
   async function loadDashboardData(silent = false) {
     const tracker = silent ? null : startSyncProgress("Retrieving data", "Loading the latest dashboard records...");
     try {
-      tracker?.update("Reading records from MongoDB...", 28);
+      tracker?.update("Reading the latest saved records...", 28);
       const [usersRes, officialsRes, announcementsRes, reportsRes, servicesRes, messagesRes, subscriptionsRes, activityRes, notificationsRes, settingsRes, contentRes, catalogRes, deptRes, meRes] = await Promise.all([
         api.get("/api/admin/users", { headers: authHeaders(), params: buildUserQueryParams() }),
         api.get("/api/officials/all", { headers: authHeaders() }),
@@ -1032,7 +1071,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
         setEvacuationCenters(evacRes.data || []);
         setEmergencyHotlines(hotlineRes.data || []);
       }
-      tracker?.finish("Dashboard data is synced.");
+      tracker?.finish("Dashboard records are up to date.");
     } catch (err: any) {
       tracker?.finish("Sync failed. Please try again.");
       if (!silent) {
@@ -1058,13 +1097,13 @@ export default function RoleDashboard({ role }: DashboardProps) {
   }
 
   async function runActionWithFeedback(title: string, action: () => Promise<void>) {
-    const tracker = startSyncProgress(resolveSyncTitle(title), "Writing changes to the database...");
+    const tracker = startSyncProgress(resolveSyncTitle(title), "Saving your changes...");
     try {
-      tracker.update("Saving changes in MongoDB...", 38);
+      tracker.update("Saving changes to the official records...", 38);
       await action();
       tracker.update("Refreshing the system view...", 76);
       await loadDashboardData(true);
-      tracker.finish("System and database are synced.");
+      tracker.finish("Records are up to date.");
       setFeedback({ type: "success", title, message: `Completed at ${new Date().toLocaleString()}` });
     } catch (err) {
       tracker.finish("Sync failed. No local state was finalized.");
@@ -1215,19 +1254,40 @@ export default function RoleDashboard({ role }: DashboardProps) {
       .filter((x) => x.label && x.value);
   }
 
-  const navItems: Array<{ id: Panel; label: string; icon: JSX.Element }> = [
-    { id: "overview", label: "Overview", icon: <LayoutDashboard size={16} /> },
-    { id: "users", label: "Users", icon: <Users size={16} /> },
-    { id: "officials", label: "Officials", icon: <Building2 size={16} /> },
-    { id: "announcements", label: "Announcements", icon: <Bell size={16} /> },
-    { id: "reports", label: "Reports", icon: <AlertTriangle size={16} /> },
-    { id: "services", label: "Service Requests", icon: <FileText size={16} /> },
-    { id: "messages", label: "Messages", icon: <Mail size={16} /> },
-    { id: "subscriptions", label: "Subscribers", icon: <Mail size={16} /> },
-    { id: "restore", label: "Restore Data", icon: <Archive size={16} /> },
-    { id: "settings", label: "System Settings", icon: <Settings size={16} /> },
-    { id: "notifications", label: "System Notifications", icon: <Bell size={16} /> },
-    { id: "audit", label: "My Activity", icon: <ClipboardCheck size={16} /> },
+  const navGroups: Array<
+    | { kind: "item"; id: Panel; label: string; icon: JSX.Element }
+    | { kind: "group"; label: string; icon: JSX.Element; open: boolean; setOpen: (value: boolean) => void; children: Array<{ id: Panel; label: string; icon: JSX.Element }> }
+  > = [
+    { kind: "item", id: "overview", label: "Dashboard", icon: <LayoutDashboard size={16} /> },
+    {
+      kind: "group",
+      label: "Users",
+      icon: <Users size={16} />,
+      open: usersNavOpen,
+      setOpen: setUsersNavOpen,
+      children: [
+        { id: "users", label: "Users", icon: <Users size={16} /> },
+        { id: "officials", label: "Officials", icon: <Building2 size={16} /> },
+      ],
+    },
+    { kind: "item", id: "announcements", label: "Announcements", icon: <Bell size={16} /> },
+    { kind: "item", id: "reports", label: "Reports", icon: <AlertTriangle size={16} /> },
+    { kind: "item", id: "services", label: "Service Requests", icon: <FileText size={16} /> },
+    { kind: "item", id: "messages", label: "Messages", icon: <Mail size={16} /> },
+    { kind: "item", id: "subscriptions", label: "Subscribers", icon: <Mail size={16} /> },
+    { kind: "item", id: "restore", label: "Restore Data", icon: <Archive size={16} /> },
+    {
+      kind: "group",
+      label: "System Settings",
+      icon: <Settings size={16} />,
+      open: systemNavOpen,
+      setOpen: setSystemNavOpen,
+      children: [
+        { id: "settings", label: "System Settings", icon: <Settings size={16} /> },
+        { id: "notifications", label: "System Notifications", icon: <Bell size={16} /> },
+        { id: "audit", label: "My Activity", icon: <ClipboardCheck size={16} /> },
+      ],
+    },
   ];
 
   const card = "space-y-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm";
@@ -1353,7 +1413,24 @@ export default function RoleDashboard({ role }: DashboardProps) {
       {isMenuOpen && (
         <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setIsMenuOpen(false)}>
           <div className="absolute left-4 right-4 top-20 rounded-xl border border-slate-200 bg-white p-2 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            {navItems.map((item) => <button key={item.id} className={`mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${activePanel === item.id ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"}`} onClick={() => { setActivePanel(item.id); setIsMenuOpen(false); }} type="button">{item.icon}<span className="min-w-0">{item.label}</span></button>)}
+            {navGroups.map((item) => {
+              if (item.kind === "item") {
+                return <button key={item.id} className={`mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${activePanel === item.id ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"}`} onClick={() => { setActivePanel(item.id); setIsMenuOpen(false); }} type="button">{item.icon}<span className="min-w-0">{item.label}</span></button>;
+              }
+              const activeGroup = item.children.some((child) => child.id === activePanel);
+              return (
+                <div key={item.label} className="mb-1">
+                  <button className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${activeGroup ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-100"}`} onClick={() => item.setOpen(!item.open)} type="button">
+                    {item.icon}<span className="min-w-0 flex-1">{item.label}</span><ChevronDown size={15} className={`transition ${item.open ? "rotate-180" : ""}`} />
+                  </button>
+                  {item.open ? (
+                    <div className="ml-4 mt-1 space-y-1 border-l border-slate-200 pl-2">
+                      {item.children.map((child) => <button key={child.id} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition ${activePanel === child.id ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"}`} onClick={() => { setActivePanel(child.id); setIsMenuOpen(false); }} type="button">{child.icon}<span className="min-w-0">{child.label}</span></button>)}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1381,20 +1458,58 @@ export default function RoleDashboard({ role }: DashboardProps) {
             </button>
           </div>
           <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-3">
-            {navItems.map((item) => {
-              const active = activePanel === item.id;
+            {navGroups.map((item) => {
+              if (item.kind === "item") {
+                const active = activePanel === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition ${active ? "bg-slate-900 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100"}`}
+                    onClick={() => { setActivePanel(item.id); setIsMenuOpen(false); }}
+                    type="button"
+                    title={item.label}
+                    aria-label={item.label}
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">{item.icon}</span>
+                    {!isSidebarCollapsed ? <span className="min-w-0 truncate">{item.label}</span> : null}
+                  </button>
+                );
+              }
+              const activeGroup = item.children.some((child) => child.id === activePanel);
               return (
-                <button
-                  key={item.id}
-                  className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition ${active ? "bg-slate-900 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100"}`}
-                  onClick={() => { setActivePanel(item.id); setIsMenuOpen(false); }}
-                  type="button"
-                  title={item.label}
-                  aria-label={item.label}
-                >
-                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">{item.icon}</span>
-                  {!isSidebarCollapsed ? <span className="min-w-0 truncate">{item.label}</span> : null}
-                </button>
+                <div key={item.label} className="space-y-1">
+                  <button
+                    className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition ${activeGroup ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-100"}`}
+                    onClick={() => item.setOpen(!item.open)}
+                    type="button"
+                    title={item.label}
+                    aria-label={item.label}
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">{item.icon}</span>
+                    {!isSidebarCollapsed ? <span className="min-w-0 flex-1 truncate text-left">{item.label}</span> : null}
+                    {!isSidebarCollapsed ? <ChevronDown size={15} className={`transition ${item.open ? "rotate-180" : ""}`} /> : null}
+                  </button>
+                  {(item.open || isSidebarCollapsed) ? (
+                    <div className={`${isSidebarCollapsed ? "space-y-1" : "ml-5 space-y-1 border-l border-slate-200 pl-3"}`}>
+                      {item.children.map((child) => {
+                        const active = activePanel === child.id;
+                        return (
+                          <button
+                            key={child.id}
+                            className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition ${active ? "bg-slate-900 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100"}`}
+                            onClick={() => { setActivePanel(child.id); setIsMenuOpen(false); }}
+                            type="button"
+                            title={child.label}
+                            aria-label={child.label}
+                          >
+                            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">{child.icon}</span>
+                            {!isSidebarCollapsed ? <span className="min-w-0 truncate">{child.label}</span> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
               );
             })}
           </nav>
@@ -1434,7 +1549,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.28em] text-slate-400">{role === "superadmin" ? "Superadmin Control" : "Admin Workspace"}</p>
-                <h1 className="mt-1 text-2xl font-bold text-slate-900">Operations Overview</h1>
+                <h1 className="mt-1 text-2xl font-bold text-slate-900">Dashboard</h1>
                 <p className="mt-1 max-w-2xl text-sm text-slate-500">Monitor registrations, requests, reports, notifications, and system activity in one place.</p>
               </div>
               <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -1729,11 +1844,19 @@ export default function RoleDashboard({ role }: DashboardProps) {
               </div>
               <PanelSearchFilters value={tableFilters.reports} onChange={(next) => updateTableFilter("reports", next)} placeholder="Search issue reports..." />
               <CategoryFilter title="Report Categories" options={reportCategoryOptions} value={reportCategory} onChange={setReportCategory} />
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs font-semibold text-slate-500">Sorted by date and time</p>
+                <select className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700" value={reportSortOrder} onChange={(e) => setReportSortOrder(e.target.value as "newest" | "oldest")}>
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </div>
               <div className="overflow-x-auto rounded-2xl border border-slate-200">
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-4 py-3 font-semibold">Reference</th>
+                      <th className="px-4 py-3 font-semibold">Date / Time</th>
                       <th className="px-4 py-3 font-semibold">Category</th>
                       <th className="px-4 py-3 font-semibold">Details</th>
                       <th className="px-4 py-3 font-semibold">Status</th>
@@ -1744,9 +1867,12 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     {filteredReports.map((r) => (
                       <tr key={r._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">{r.referenceNo}</td>
+                        <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(r.createdAt)}</td>
                         <td className="px-4 py-3 text-slate-700">{r.category}</td>
                         <td className="px-4 py-3 text-slate-600">
                           <p>{r.description}</p>
+                          <p className="mt-2 text-xs text-slate-500">Handled by: {handlerLabel(r)}</p>
+                          {r.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{r.adminComment}"</p> : null}
                           {r.attachments?.[0]?.dataUrl ? (
                             <button className="mt-2 text-xs font-semibold text-blue-700 underline" onClick={() => window.open(r.attachments?.[0]?.dataUrl, "_blank", "noopener,noreferrer")} type="button">
                               View attachment
@@ -1787,11 +1913,19 @@ export default function RoleDashboard({ role }: DashboardProps) {
               </div>
               <PanelSearchFilters value={tableFilters.services} onChange={(next) => updateTableFilter("services", next)} placeholder="Search service requests..." />
               <CategoryFilter title="Service Categories" options={serviceCategoryOptions} value={serviceCategory} onChange={setServiceCategory} />
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-xs font-semibold text-slate-500">Sorted by date and time</p>
+                <select className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700" value={serviceSortOrder} onChange={(e) => setServiceSortOrder(e.target.value as "newest" | "oldest")}>
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </div>
               <div className="overflow-x-auto rounded-2xl border border-slate-200">
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-4 py-3 font-semibold">Reference</th>
+                      <th className="px-4 py-3 font-semibold">Date / Time</th>
                       <th className="px-4 py-3 font-semibold">Service</th>
                       <th className="px-4 py-3 font-semibold">Resident</th>
                       <th className="px-4 py-3 font-semibold">Status</th>
@@ -1802,8 +1936,13 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     {filteredServices.map((s) => (
                       <tr key={s._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">{s.referenceNo}</td>
+                        <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(s.createdAt)}</td>
                         <td className="px-4 py-3 text-slate-700">{s.serviceType}</td>
-                        <td className="px-4 py-3 text-slate-600">{s.fullName}</td>
+                        <td className="px-4 py-3 text-slate-600">
+                          <p>{s.fullName}</p>
+                          <p className="mt-2 text-xs text-slate-500">Handled by: {handlerLabel(s)}</p>
+                          {s.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{s.adminComment}"</p> : null}
+                        </td>
                         <td className="px-4 py-3"><Badge value={s.status} /></td>
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap gap-2">
@@ -1811,7 +1950,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                             {hasModulePermission("serviceRequests", "archive") ? (
                               <button
                                 className={iconBtn}
-                                onClick={() => setPendingAction({ title: "Archive Service Request", message: `Archive ${s.referenceNo}?`, confirmLabel: "Archive", run: () => runActionWithFeedback("Service request archived", () => api.patch(`/api/services/requests/${s._id}/status`, { status: "rejected", note: "Archived by superadmin" }, { headers: authHeaders() })) })}
+                                onClick={() => setPendingAction({ title: "Archive Service Request", message: `Archive ${s.referenceNo}?`, confirmLabel: "Archive", run: () => runActionWithFeedback("Service request archived", () => api.patch(`/api/services/requests/${s._id}/status`, { status: "rejected", note: "Archived by barangay staff" }, { headers: authHeaders() })) })}
                                 type="button"
                                 title="Archive service request"
                                 aria-label="Archive service request"
@@ -1843,6 +1982,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-4 py-3 font-semibold">Reference</th>
+                      <th className="px-4 py-3 font-semibold">Date / Time</th>
                       <th className="px-4 py-3 font-semibold">Sender</th>
                       <th className="px-4 py-3 font-semibold">Department</th>
                       <th className="px-4 py-3 font-semibold">Status</th>
@@ -1853,7 +1993,12 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     {filteredMessages.map((m) => (
                       <tr key={m._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">{m.referenceNo}</td>
-                        <td className="px-4 py-3 text-slate-700">{m.name}</td>
+                        <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(m.createdAt)}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          <p>{m.name}</p>
+                          <p className="mt-2 text-xs text-slate-500">Handled by: {handlerLabel(m)}</p>
+                          {m.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{m.adminComment}"</p> : null}
+                        </td>
                         <td className="px-4 py-3 text-slate-600">{m.department}</td>
                         <td className="px-4 py-3"><Badge value={m.status} /></td>
                         <td className="px-4 py-3">
@@ -1879,6 +2024,47 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {filteredMessages.length === 0 && <p className="mt-2 text-sm text-slate-500">No messages in this category.</p>}
+              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">Closed Messages</h3>
+                    <p className="mt-1 text-xs text-slate-500">Closed items stay here so staff can restore them or delete them permanently.</p>
+                  </div>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-500">{closedMessages.length} closed</span>
+                </div>
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Reference</th>
+                        <th className="px-4 py-3 font-semibold">Closed</th>
+                        <th className="px-4 py-3 font-semibold">Sender</th>
+                        <th className="px-4 py-3 font-semibold">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {closedMessages.map((m) => (
+                        <tr key={m._id} className="border-t border-slate-200 align-top">
+                          <td className="px-4 py-3 font-semibold text-slate-900">{m.referenceNo}</td>
+                          <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(m.updatedAt || m.createdAt)}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <p>{m.name}</p>
+                            <p className="mt-1 text-xs text-slate-500">{m.department}</p>
+                            {m.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{m.adminComment}"</p> : null}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              {hasModulePermission("messages", "edit") ? <button className={btnSecondary} onClick={() => setPendingAction({ title: "Restore Message", message: `Restore ${m.referenceNo}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("Message restored", () => api.patch(`/api/contact/messages/${m._id}/status`, { status: "new" }, { headers: authHeaders() })) })} type="button">Restore</button> : null}
+                              {hasModulePermission("messages", "delete") ? <button className={btnDanger} onClick={() => setPendingAction({ title: "Delete Permanently", message: `Permanently delete ${m.referenceNo}? This cannot be restored.`, confirmLabel: "Delete Permanently", run: () => runActionWithFeedback("Message permanently deleted", () => api.delete(`/api/contact/messages/${m._id}`, { headers: authHeaders() })) })} type="button">Delete Permanently</button> : null}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {closedMessages.length === 0 && <p className="mt-3 text-sm text-slate-500">No closed messages yet.</p>}
+              </div>
             </section>
           )}
           {activePanel === "subscriptions" && (
@@ -1894,6 +2080,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-4 py-3 font-semibold">Email</th>
+                      <th className="px-4 py-3 font-semibold">Date / Time</th>
                       <th className="px-4 py-3 font-semibold">Source</th>
                       <th className="px-4 py-3 font-semibold">Status</th>
                       <th className="px-4 py-3 font-semibold">Action</th>
@@ -1902,7 +2089,12 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   <tbody>
                     {filteredSubscriptions.map((sub) => (
                       <tr key={sub._id} className="border-t border-slate-200 align-top">
-                        <td className="px-4 py-3 font-semibold text-slate-900">{sub.email}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-900">
+                          <p>{sub.email}</p>
+                          <p className="mt-2 text-xs font-normal text-slate-500">Handled by: {handlerLabel(sub)}</p>
+                          {sub.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{sub.adminComment}"</p> : null}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(sub.createdAt)}</td>
                         <td className="px-4 py-3 text-slate-600">{sub.source || "homepage"}</td>
                         <td className="px-4 py-3"><Badge value={sub.status} /></td>
                         <td className="px-4 py-3">
@@ -2090,7 +2282,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.referenceNo}</td>
                             <td className="px-4 py-3 text-slate-700">{item.serviceType}</td>
-                            <td className="px-4 py-3"><button className={iconBtn}  onClick={() => setPendingAction({ title: "Restore Service Request", message: `Restore ${item.referenceNo}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("Service request restored", () => api.patch(`/api/services/requests/${item._id}/status`, { status: "pending", note: "Restored by superadmin" }, { headers: authHeaders() })) })} type="button" title="Restore item" aria-label="Restore item"><Archive size={16} /></button></td>
+                            <td className="px-4 py-3"><button className={iconBtn}  onClick={() => setPendingAction({ title: "Restore Service Request", message: `Restore ${item.referenceNo}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("Service request restored", () => api.patch(`/api/services/requests/${item._id}/status`, { status: "pending", note: "Restored by barangay staff" }, { headers: authHeaders() })) })} type="button" title="Restore item" aria-label="Restore item"><Archive size={16} /></button></td>
                           </tr>
                         ))}
                       </tbody>
@@ -2178,7 +2370,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <button className={`${btnSecondary} justify-start text-sm`} onClick={() => setServicesEditOpen(true)} type="button">Manage Services Catalog</button>
                       </div>
                     ) : (
-                      <p className="text-sm text-slate-500">Only superadmin can edit resident-facing content.</p>
+                      <p className="text-sm text-slate-500">Only authorized system administrators can edit resident-facing content.</p>
                     )}
                   </div>
                   {canManage && (
@@ -2193,7 +2385,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </>
               ) : (
                 <div className="rounded-xl border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500">
-                  Advanced system controls are hidden. Turn on Developer Options, save the setting, and the controls will remain synced with MongoDB.
+                  Advanced system controls are hidden. Turn on Developer Options, save the setting, and the controls will stay aligned with the latest saved records.
                 </div>
               )}
               {canManage && (
@@ -2210,7 +2402,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold">System Notifications</h2>
-                  <p className="mt-1 text-sm text-slate-500">Live system events from the centralized notification service. This view refreshes automatically every few seconds.</p>
+                  <p className="mt-1 text-sm text-slate-500">Live system events from recent staff and resident actions. This view refreshes automatically every few seconds.</p>
                 </div>
                 <div className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{adminNotifications.length} updates</div>
               </div>
@@ -2746,6 +2938,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Address"><input className={inputBase} value={reportManageModal.address || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, address: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Category"><input className={inputBase} value={reportManageModal.category} onChange={(e) => setReportManageModal((p) => p ? { ...p, category: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Description"><textarea className={inputBase} rows={3} value={reportManageModal.description} onChange={(e) => setReportManageModal((p) => p ? { ...p, description: e.target.value } : p)} /></LabeledField>
+              <LabeledField label='Comment from the admins'><textarea className={inputBase} rows={3} placeholder="Resident-facing update or action taken" value={reportManageModal.adminComment || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, adminComment: e.target.value } : p)} /></LabeledField>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Handled by: {handlerLabel(reportManageModal)}</div>
               {reportManageModal.attachments?.[0]?.dataUrl ? <button className={btnSecondary} onClick={() => window.open(reportManageModal.attachments?.[0]?.dataUrl, "_blank", "noopener,noreferrer")} type="button">View Attachment</button> : null}
               <LabeledField label="Status">
                 <select className={inputBase} value={reportManageModal.status} onChange={(e) => setReportManageModal((p) => p ? { ...p, status: e.target.value } : p)}>
@@ -2772,6 +2966,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Contact"><input className={inputBase} value={serviceManageModal.contactNumber || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, contactNumber: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Address"><input className={inputBase} value={serviceManageModal.address || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, address: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Purpose"><textarea className={inputBase} rows={3} value={serviceManageModal.purpose || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, purpose: e.target.value } : p)} /></LabeledField>
+              <LabeledField label='Comment from the admins'><textarea className={inputBase} rows={3} placeholder="Resident-facing update or action taken" value={serviceManageModal.adminComment || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, adminComment: e.target.value } : p)} /></LabeledField>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Handled by: {handlerLabel(serviceManageModal)}</div>
               <LabeledField label="Status">
                 <select className={inputBase} value={serviceManageModal.status} onChange={(e) => setServiceManageModal((p) => p ? { ...p, status: e.target.value } : p)}>
                   <option value="pending">pending</option>
@@ -2797,6 +2993,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Contact"><input className={inputBase} value={messageManageModal.contact || ""} onChange={(e) => setMessageManageModal((p) => p ? { ...p, contact: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Department"><input className={inputBase} value={messageManageModal.department} onChange={(e) => setMessageManageModal((p) => p ? { ...p, department: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Message"><textarea className={inputBase} rows={3} value={messageManageModal.message || ""} onChange={(e) => setMessageManageModal((p) => p ? { ...p, message: e.target.value } : p)} /></LabeledField>
+              <LabeledField label='Comment from the admins'><textarea className={inputBase} rows={3} placeholder="Resident-facing update or action taken" value={messageManageModal.adminComment || ""} onChange={(e) => setMessageManageModal((p) => p ? { ...p, adminComment: e.target.value } : p)} /></LabeledField>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Handled by: {handlerLabel(messageManageModal)}</div>
               <LabeledField label="Status">
                 <select className={inputBase} value={messageManageModal.status} onChange={(e) => setMessageManageModal((p) => p ? { ...p, status: e.target.value } : p)}>
                   <option value="new">new</option>
@@ -2817,6 +3015,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
             <div className="grid gap-3 [&_input]:w-full [&_select]:w-full">
               <LabeledField label="Email"><input className={inputBase} type="email" value={subscriptionManageModal.email} onChange={(e) => setSubscriptionManageModal((p) => p ? { ...p, email: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Source"><input className={inputBase} value={subscriptionManageModal.source || ""} onChange={(e) => setSubscriptionManageModal((p) => p ? { ...p, source: e.target.value } : p)} /></LabeledField>
+              <LabeledField label='Comment from the admins'><textarea className={inputBase} rows={3} placeholder="Subscriber-facing update or note" value={subscriptionManageModal.adminComment || ""} onChange={(e) => setSubscriptionManageModal((p) => p ? { ...p, adminComment: e.target.value } : p)} /></LabeledField>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Handled by: {handlerLabel(subscriptionManageModal)}</div>
               <LabeledField label="Status">
                 <select className={inputBase} value={subscriptionManageModal.status} onChange={(e) => setSubscriptionManageModal((p) => p ? { ...p, status: e.target.value as "active" | "unsubscribed" } : p)}>
                   <option value="active">active</option>
@@ -3372,7 +3572,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <button onClick={() => setAccountControlModal(null)} type="button"><X size={18} /></button>
             </div>
             <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-xs leading-5 text-emerald-900">
-              Changes made here apply immediately to both the system and database after confirmation.
+              Changes made here apply immediately after confirmation.
             </div>
             <div className={`grid gap-3 ${canManage ? "md:grid-cols-2" : "md:grid-cols-1"}`}>
               {canManage ? (

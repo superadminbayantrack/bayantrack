@@ -5,6 +5,30 @@ const TOKEN_KEY = "token";
 let activeToken: string | null = null;
 let activeRole: UserRole | null = null;
 
+function getStoredValue(key: string): string | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+  } catch (_err) {
+    return null;
+  }
+}
+
+function setStoredValue(key: string, value: string) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (_err) {
+    try {
+      window.sessionStorage.setItem(key, value);
+    } catch (_fallbackErr) {
+      // Storage can be unavailable in private or restricted browser contexts.
+    }
+  }
+}
+
 function clearPersistentAuthStorage() {
   if (typeof window === "undefined") return;
 
@@ -18,8 +42,6 @@ function clearPersistentAuthStorage() {
   }
 }
 
-clearPersistentAuthStorage();
-
 export function normalizeRole(value: unknown): UserRole | null {
   const role = String(value || "").trim().toLowerCase();
   if (role === "resident" || role === "admin" || role === "superadmin") {
@@ -28,18 +50,28 @@ export function normalizeRole(value: unknown): UserRole | null {
   return null;
 }
 
+function hydrateAuthSession() {
+  activeToken = getStoredValue(TOKEN_KEY);
+  activeRole = normalizeRole(getStoredValue(ROLE_KEY));
+}
+
+hydrateAuthSession();
+
 export function getToken(): string | null {
+  if (!activeToken) activeToken = getStoredValue(TOKEN_KEY);
   return activeToken;
 }
 
 export function getRole(): UserRole | null {
+  if (!activeRole) activeRole = normalizeRole(getStoredValue(ROLE_KEY));
   return activeRole;
 }
 
 export function setAuthSession(token: string, role: UserRole) {
   activeToken = token;
   activeRole = role;
-  clearPersistentAuthStorage();
+  setStoredValue(TOKEN_KEY, token);
+  setStoredValue(ROLE_KEY, role);
 }
 
 export function clearAuthSession() {

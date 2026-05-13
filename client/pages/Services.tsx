@@ -61,7 +61,7 @@ export default function Services() {
   const [services, setServices] = useState<ServiceCatalog[]>([]);
   const [content, setContent] = useState<{ servicesHeroTitle: string; servicesHeroSubtitle: string }>({
     servicesHeroTitle: "Online Services Portal",
-    servicesHeroSubtitle: "Certificate of Indigency, Barangay Clearance, and Barangay ID requests with real database tracking.",
+    servicesHeroSubtitle: "Certificate of Indigency, Barangay Clearance, and Barangay ID requests with clear request tracking.",
   });
   const [history, setHistory] = useState<ServiceRequest[]>([]);
   const [activeCode, setActiveCode] = useState<string | null>(null);
@@ -201,7 +201,7 @@ export default function Services() {
             <div className="rounded-xl border border-slate-200 bg-white p-6">
               <div className="mb-3 inline-flex rounded-md bg-blue-50 p-2 text-blue-700"><History size={18} /></div>
               <h3 className="text-lg font-semibold text-slate-900">Request History</h3>
-              <p className="mt-1 text-sm text-slate-600">Your latest requests from the database.</p>
+              <p className="mt-1 text-sm text-slate-600">Your latest submitted requests.</p>
               <div className="mt-4 space-y-2 text-sm">
                 {history.slice(0, 4).map((item) => (
                   <div key={item._id} className="rounded border border-slate-200 p-2">

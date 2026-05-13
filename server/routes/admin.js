@@ -159,7 +159,12 @@ function accountApprovedHtml({ firstName, fullName }) {
       <div style="padding:20px;color:#0f172a;">
         <p style="margin:0 0 10px;">Hi <strong>${firstName || 'Resident'}</strong>,</p>
         <p style="margin:0 0 12px;line-height:1.6;">
-          Your BayanTrack resident account has been approved. You can now log in and use the system.
+          Your BayanTrack resident account has been approved. You can now log in and use the resident portal.
+        </p>
+        <p style="margin:0 0 12px;line-height:1.6;">
+          By using the portal, please keep your account details private, submit only correct information,
+          and use the services for barangay-related requests only. Your information is used to verify
+          requests, contact you about updates, and help barangay staff respond properly.
         </p>
         <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;margin:14px 0;">
           <p style="margin:0;font-size:12px;color:#166534;">Approved Account</p>
@@ -228,7 +233,18 @@ function childStatusUpdateHtml({ parentName, childName, status, reason }) {
         <p style="margin:0 0 12px;line-height:1.6;">
           The linked child access request for <strong>${childName}</strong> was <strong>${statusLabel}</strong>.
         </p>
-        ${status === 'approved' ? '<p style="margin:0 0 12px;line-height:1.6;">The child may now use the parent account with your approval.</p>' : ''}
+        ${status === 'approved' ? `
+        <p style="margin:0 0 12px;line-height:1.6;">
+          The linked child may now access BayanTrack with your approval. To log in, the child should use
+          the registered child email address and the parent account password. Once signed in, the child can
+          request barangay services, contact the barangay office, and report an issue under the parent account.
+        </p>
+        <p style="margin:0 0 12px;line-height:1.6;">
+          Please share the password only with the approved child and update it right away if you think
+          someone else knows it. By using the account, both parent and child agree to provide accurate
+          information, use the portal responsibly, and allow barangay staff to use submitted details only
+          for verification, service processing, updates, and official response.
+        </p>` : ''}
         ${reasonBlock}
         <p style="margin:0;color:#475569;">Thanks,<br/>BayanTrack Support Team</p>
       </div>
@@ -470,7 +486,10 @@ router.patch('/users/:id/children/:childId/status', auth, requireRoles('admin', 
 
     const parentName = [user.firstName, user.lastName].filter(Boolean).join(' ');
     const html = childStatusUpdateHtml({ parentName, childName: child.fullName, status, reason: child.reviewReason || '' });
-    const text = `Hi ${parentName || 'Resident'}, the child access request for ${child.fullName} was ${status}.${child.reviewReason ? ` Reason: ${child.reviewReason}` : ''}${status === 'approved' ? ' The child may now use the parent account with your approval.' : ''}`;
+    const approvedGuide = status === 'approved'
+      ? ' To log in, the child should use the registered child email address and the parent account password. The child can request barangay services, contact the barangay office, and report an issue under the parent account. Keep the password private and use the portal only for accurate barangay-related requests.'
+      : '';
+    const text = `Hi ${parentName || 'Resident'}, the child access request for ${child.fullName} was ${status}.${child.reviewReason ? ` Reason: ${child.reviewReason}` : ''}${approvedGuide}`;
 
     const recipients = [user.email, child.email].filter(Boolean);
     if (recipients.length > 0) {
@@ -578,9 +597,9 @@ router.delete('/users/:id', auth, requireRoles('superadmin'), async (req, res) =
             firstName: user.firstName,
             fullName: [user.firstName, user.middleName, user.lastName].filter(Boolean).join(' '),
             status: 'suspended',
-            reason: 'Your account and linked records were permanently deleted by the superadmin.',
+            reason: 'Your account and linked records were permanently deleted by a barangay administrator.',
           }),
-          text: `Hi ${user.firstName || 'Resident'}, your BayanTrack account and linked records were permanently deleted by the superadmin.`,
+          text: `Hi ${user.firstName || 'Resident'}, your BayanTrack account and linked records were permanently deleted by a barangay administrator.`,
         });
       } catch (mailErr) {
         console.error('Failed to send account deletion email:', mailErr);

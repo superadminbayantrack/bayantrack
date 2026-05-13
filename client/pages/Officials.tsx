@@ -108,7 +108,7 @@ export default function Officials() {
                     </ul>
                     <div className="mt-6 border-t border-gray-100 pt-6 text-xs text-gray-400">
                       <p className="mb-1 flex items-center gap-1 font-bold"><Info size={12} /> Source Note</p>
-                      Data reflects active officials from the barangay database.
+                      Data reflects active officials from Barangay Mambog II.
                     </div>
                   </div>
                 </Reveal>

@@ -101,7 +101,7 @@ export default function ReportIssue() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">Report An Issue</h1>
-                <p className="text-sm text-gray-600">Reports are stored in MongoDB and reflected in admin/superadmin.</p>
+                <p className="text-sm text-gray-600">Your report will be sent to the barangay staff for review.</p>
               </div>
             </div>
 
@@ -177,7 +177,7 @@ export default function ReportIssue() {
               <CheckCircle size={32} strokeWidth={2.5} />
             </div>
             <h2 className="mb-3 text-2xl font-bold text-[#3b4b72]">Report Submitted</h2>
-            <p className="mb-6 px-2 text-[14px] leading-relaxed text-gray-600">Your report is now saved and visible for admin/superadmin handling.</p>
+            <p className="mb-6 px-2 text-[14px] leading-relaxed text-gray-600">Your report is now submitted and visible to the barangay staff.</p>
             <div className="mb-6 w-full rounded-xl bg-[#e0e7ff] p-5">
               <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-gray-500">REFERENCE NUMBER</p>
               <p className="text-xl font-bold tracking-wide text-[#3b4b72]">{referenceNumber}</p>

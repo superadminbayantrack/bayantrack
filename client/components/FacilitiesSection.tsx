@@ -60,7 +60,7 @@ export function FacilitiesSection() {
 
   const cards = items.length > 0 ? items.map((item) => ({ title: item.title, description: item.content, module: item.module, image: item.image })) : [
     { title: "Barangay Feed", description: "Announcements will appear here once published.", module: "barangay-updates", image: "" },
-    { title: "News Feed", description: "Community updates connected to your live database.", module: "all-news-updates", image: "" },
+    { title: "News Feed", description: "Community updates from the barangay office.", module: "all-news-updates", image: "" },
   ];
 
   return (

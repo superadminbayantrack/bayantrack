@@ -87,7 +87,7 @@ const SiteContentSchema = new mongoose.Schema(
       ],
     },
     servicesHeroTitle: { type: String, default: 'Online Services Portal' },
-    servicesHeroSubtitle: { type: String, default: 'Certificate of Indigency, Barangay Clearance, and Barangay ID requests with real database tracking.' },
+    servicesHeroSubtitle: { type: String, default: 'Certificate of Indigency, Barangay Clearance, and Barangay ID requests with clear request tracking.' },
     emergencyHotlinesTitle: { type: String, default: 'Emergency Hotlines' },
     emergencyHotlinesSubtitle: { type: String, default: 'Keep these numbers saved. Know what to do before you call.' },
     officialsPageTitle: { type: String, default: 'Barangay Officials Directory' },

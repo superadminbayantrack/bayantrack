@@ -14,7 +14,7 @@ const SuccessModal = ({ referenceNo, onClose }: { referenceNo: string; onClose: 
         <CheckCircle size={32} />
       </div>
       <h2 className="text-2xl font-bold text-slate-900">Message Sent</h2>
-      <p className="mt-2 text-sm text-slate-600">Your message was stored in the database.</p>
+      <p className="mt-2 text-sm text-slate-600">Your message was received by the barangay office.</p>
       <div className="mt-4 rounded-lg bg-slate-100 p-3 font-mono text-sm font-bold text-slate-900">{referenceNo}</div>
       <button className="mt-5 w-full rounded-lg bg-slate-900 py-3 text-sm font-semibold text-white" onClick={onClose} type="button">Close</button>
     </div>
@@ -119,7 +119,7 @@ export default function Contact() {
               <Reveal>
                 <div>
                   <h1 className="text-3xl font-bold text-[#395886]">Contact Us</h1>
-                  <p className="mt-3 text-slate-600">Send us a message and reach departments with real MongoDB-backed records.</p>
+                  <p className="mt-3 text-slate-600">Send us a message and reach the right barangay department.</p>
                 </div>
               </Reveal>
 

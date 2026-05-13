@@ -62,6 +62,12 @@ type ChildSessionForm = {
 
 const RELATIONSHIP_OPTIONS = ["Child", "Son", "Daughter", "Stepchild", "Ward", "Dependent"];
 
+function childStatusDotClass(status?: ChildLink["status"]) {
+  if (status === "approved") return "bg-emerald-500 ring-emerald-100";
+  if (status === "rejected") return "bg-red-500 ring-red-100";
+  return "bg-amber-500 ring-amber-100";
+}
+
 export default function ProfileSettings() {
   const navigate = useNavigate();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -232,7 +238,7 @@ export default function ProfileSettings() {
       setChildren(Array.isArray(res.data?.children) ? res.data.children : children);
       setChildOtpModal({ isOpen: false, index: null, otp: "", sending: false, verifying: false });
       setChildRequestProgress(100);
-      setFeedback({ isOpen: true, title: "Child Request Submitted", message: "The child access request is now pending superadmin approval.", type: "success" });
+      setFeedback({ isOpen: true, title: "Child Request Submitted", message: "The child access request is now waiting for barangay approval.", type: "success" });
       window.setTimeout(() => setChildRequestProgress(0), 600);
     } catch (err: any) {
       setChildRequestProgress(52);
@@ -439,7 +445,7 @@ export default function ProfileSettings() {
                 <p className="text-[13px] leading-relaxed text-gray-600">
                   {isChildSession
                     ? `You are using the parent account under child access as ${actingChild?.fullName || actingChild?.email}. Parent personal information is locked in this mode.`
-                    : "Account updates are reflected in admin and superadmin resident details."}
+                    : "Account updates are reflected in the barangay staff review dashboard."}
                 </p>
               </div>
 
@@ -627,10 +633,10 @@ export default function ProfileSettings() {
                     <h2 className="text-sm font-bold text-[#1e3a8a]">Children Linked to Parent Account</h2>
                     <button type="button" onClick={addChildRow} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Add Child</button>
                   </div>
-                  <p className="text-xs text-slate-500">Linked records must include full name, email, and a birth date showing 18 years old or above before they can be submitted for superadmin review.</p>
+                  <p className="text-xs text-slate-500">Linked records must include full name, email, and a birth date showing 18 years old or above before they can be submitted for barangay review.</p>
                   <div className="space-y-3">
                     {children.map((child, index) => (
-                      <div key={index} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-[1.4fr,1.2fr,1fr,1fr,auto]">
+                      <div key={index} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-[1.4fr,1.2fr,1fr,1.25fr]">
                         <div className="space-y-1.5">
                           <label className="block text-xs font-bold text-gray-800">Child Full Name</label>
                           <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" value={child.fullName} onChange={(e) => handleChildChange(index, "fullName", e.target.value)} />
@@ -645,22 +651,24 @@ export default function ProfileSettings() {
                         </div>
                         <div className="space-y-1.5">
                           <label className="block text-xs font-bold text-gray-800">Relationship</label>
-                          <select className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" value={child.relationship || "Child"} onChange={(e) => handleChildChange(index, "relationship", e.target.value)}>
-                            {RELATIONSHIP_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-                          </select>
-                        </div>
-                        <div className="flex flex-col items-stretch justify-end gap-2">
-                          {child.status ? (
-                            <div className={`rounded-md px-3 py-2 text-center text-[11px] font-semibold ${child.status === "approved" ? "bg-emerald-50 text-emerald-700" : child.status === "rejected" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>
-                              {child.status}
-                            </div>
-                          ) : null}
-                          <button type="button" onClick={() => setChildActionModal({ index })} className="inline-flex h-10 w-10 items-center justify-center self-end rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" aria-label={`Open actions for ${child.fullName || "child"}`}>
-                            <MoreHorizontal size={18} />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <select className="min-w-0 flex-1 rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" value={child.relationship || "Child"} onChange={(e) => handleChildChange(index, "relationship", e.target.value)}>
+                              {RELATIONSHIP_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                            </select>
+                            {child.status ? (
+                              <span
+                                className={`h-3.5 w-3.5 shrink-0 rounded-full ring-4 ${childStatusDotClass(child.status)}`}
+                                title={`Status: ${child.status}`}
+                                aria-label={`Child access status: ${child.status}`}
+                              />
+                            ) : null}
+                            <button type="button" onClick={() => setChildActionModal({ index })} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" aria-label={`Open actions for ${child.fullName || "child"}`}>
+                              <MoreHorizontal size={18} />
+                            </button>
+                          </div>
                         </div>
                         {childOtpModal.index === index && childRequestProgress > 0 ? (
-                          <div className="md:col-span-5">
+                          <div className="md:col-span-4">
                             <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-slate-500">
                               <span>{childRequestProgress >= 100 ? "Request submitted to admin" : "Syncing child access request"}</span>
                               <span>{childRequestProgress}%</span>
@@ -893,11 +901,11 @@ export default function ProfileSettings() {
               <p><span className="font-semibold">Birth Date:</span> {children[childOtpModal.index].birthDate}</p>
               <p><span className="font-semibold">Relationship:</span> {children[childOtpModal.index].relationship || "Child"}</p>
             </div>
-            <p className="mt-3 text-sm text-slate-600">An OTP was sent to the parent email. Enter it below to submit this child access request for superadmin approval.</p>
+            <p className="mt-3 text-sm text-slate-600">An OTP was sent to the parent email. Enter it below to submit this child access request for barangay approval.</p>
             {childRequestProgress > 0 ? (
               <div className="mt-4">
                 <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-slate-500">
-                  <span>{childOtpModal.verifying ? "Verifying and saving to database" : "Waiting for OTP verification"}</span>
+                  <span>{childOtpModal.verifying ? "Verifying and saving your request" : "Waiting for OTP verification"}</span>
                   <span>{childRequestProgress}%</span>
                 </div>
                 <div className="h-2 rounded-full bg-slate-100">

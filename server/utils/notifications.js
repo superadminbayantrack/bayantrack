@@ -24,6 +24,37 @@ function buildSystemEventHtml({ title, type, referenceNo, metadata }) {
   </div>`;
 }
 
+export async function resolveActorDetails(userPayload = {}) {
+  const actorId = String(userPayload?.id || userPayload || '').trim();
+  const embeddedAccount = actorId ? getEmbeddedAccountById(actorId) : null;
+
+  if (embeddedAccount) {
+    return {
+      id: embeddedAccount.id,
+      name: [embeddedAccount.firstName, embeddedAccount.lastName].filter(Boolean).join(' ') || embeddedAccount.username,
+      role: embeddedAccount.role || 'staff',
+    };
+  }
+
+  if (actorId && mongoose.Types.ObjectId.isValid(actorId)) {
+    const user = await User.findById(actorId).select('firstName middleName lastName username role').lean();
+    if (user) {
+      const fullName = [user.firstName, user.middleName, user.lastName].filter(Boolean).join(' ').trim();
+      return {
+        id: actorId,
+        name: fullName || user.username || 'Barangay Staff',
+        role: user.role || userPayload?.role || 'staff',
+      };
+    }
+  }
+
+  return {
+    id: actorId || '',
+    name: userPayload?.username || 'Barangay Staff',
+    role: userPayload?.role || 'staff',
+  };
+}
+
 export async function logSystemEvent({
   user,
   type,

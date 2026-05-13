@@ -54,7 +54,7 @@ export function ProjectsSection() {
         <div className="mb-8 flex flex-col gap-3 sm:mb-12 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className="text-3xl md:text-4xl font-extrabold text-primary mb-3 tracking-tight">Projects & Activities</h2>
-            <p className="text-gray-500 font-medium">Live announcement feed from your database.</p>
+            <p className="text-gray-500 font-medium">Latest announcement feed from the barangay office.</p>
           </div>
           <Link to="/announcements" className="flex items-center gap-1 text-primary font-bold text-sm hover:underline">View All<ArrowRight className="w-4 h-4" /></Link>
         </div>

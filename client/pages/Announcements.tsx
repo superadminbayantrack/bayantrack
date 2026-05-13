@@ -95,7 +95,7 @@ export default function Announcements() {
         <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
           <div className="mb-8 rounded-2xl bg-slate-900 p-6 text-white sm:p-8">
             <h1 className="text-2xl font-bold sm:text-3xl">Community Announcements</h1>
-            <p className="mt-2 text-slate-300">Real-time updates from your barangay database.</p>
+            <p className="mt-2 text-slate-300">Latest updates from Barangay Mambog II.</p>
           </div>
 
           <div className="mb-6 grid gap-3 md:grid-cols-[1fr,260px]">

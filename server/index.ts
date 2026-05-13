@@ -64,6 +64,17 @@ async function ensureMongoConnected(uri: string) {
   await mongoose.connect(uri, getMongoConnectionOptions(uri));
 }
 
+async function removeLegacyBootstrapAccounts() {
+  await User.deleteMany({
+    role: "admin",
+    $or: [
+      { email: "admin@bayantrack.com" },
+      { username: "admin123" },
+      { contactNumber: "00000000000" },
+    ],
+  });
+}
+
 async function findBootstrapAccountOwner(account: BootstrapAccount) {
   return User.findOne({
     $or: [
@@ -134,6 +145,8 @@ async function connectAndSeed() {
   await ensureMongoConnected(uri);
 
   if (dbInitialized) return;
+
+  await removeLegacyBootstrapAccounts();
 
   for (const account of getBootstrapAccounts()) {
     await repairBootstrapAccount(account);

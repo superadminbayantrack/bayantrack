@@ -4,7 +4,7 @@ import IssueReport from '../models/IssueReport.js';
 import User from '../models/User.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
-import { getAdminNotificationRecipients, logSystemEvent, sendUserMail } from '../utils/notifications.js';
+import { getAdminNotificationRecipients, logSystemEvent, resolveActorDetails, sendUserMail } from '../utils/notifications.js';
 
 const router = express.Router();
 const REPORT_STATUSES = ['new', 'in-review', 'resolved', 'rejected'];
@@ -32,21 +32,31 @@ function reportEmailHtml({ title, lines = [] }) {
       <div style="padding:20px;color:#0f172a;">
         <p style="margin:0 0 12px;font-weight:700;">${title}</p>
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;">
-          ${lines.map((line) => `<p style="margin:0 0 8px;">${line}</p>`).join('')}
+          ${lines.filter(Boolean).map((line) => `<p style="margin:0 0 8px;">${line}</p>`).join('')}
         </div>
       </div>
     </div>
   </div>`;
 }
 
-async function notifyReportUpdate({ report, title, textTitle }) {
+async function notifyReportUpdate({ report, title, textTitle, actor, comment = '' }) {
   const lines = [
     `<strong>Reference:</strong> ${report.referenceNo}`,
     `<strong>Category:</strong> ${report.category}`,
     `<strong>Status:</strong> ${report.status}`,
     `<strong>Reporter:</strong> ${report.fullName}`,
+    actor?.name ? `<strong>Handled by:</strong> ${actor.name}${actor.role ? ` (${actor.role})` : ''}` : '',
+    comment ? `<strong>Comment from the admins:</strong> ${comment}` : '',
   ];
-  const text = `${textTitle}\nReference: ${report.referenceNo}\nCategory: ${report.category}\nStatus: ${report.status}\nReporter: ${report.fullName}`;
+  const text = [
+    textTitle,
+    `Reference: ${report.referenceNo}`,
+    `Category: ${report.category}`,
+    `Status: ${report.status}`,
+    `Reporter: ${report.fullName}`,
+    actor?.name ? `Handled by: ${actor.name}${actor.role ? ` (${actor.role})` : ''}` : '',
+    comment ? `Comment from the admins: ${comment}` : '',
+  ].filter(Boolean).join('\n');
   const recipients = await getAdminNotificationRecipients();
 
   if (recipients.length > 0) {
@@ -117,7 +127,7 @@ router.get('/', auth, requireRoles('admin', 'superadmin'), async (_req, res) => 
 router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermission('reports', 'edit'), async (req, res) => {
   try {
     const update = {};
-    ['fullName', 'contactNumber', 'address', 'category', 'description'].forEach((key) => {
+    ['fullName', 'contactNumber', 'address', 'category', 'description', 'adminComment'].forEach((key) => {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     });
     if (req.body.status !== undefined) {
@@ -133,6 +143,12 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
     if (!existing) {
       return res.status(404).json({ msg: 'Report not found' });
     }
+    const actor = await resolveActorDetails(req.user);
+    update.handledByName = actor.name;
+    update.handledByRole = actor.role;
+    update.handledAt = new Date();
+    update.handledByUser = mongoose.Types.ObjectId.isValid(actor.id) ? actor.id : null;
+
     const report = await IssueReport.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
 
     await logSystemEvent({
@@ -142,11 +158,13 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
       referenceNo: report.referenceNo,
       metadata: { action: 'update', module: 'reports' },
     });
-    if (update.status && existing.status !== update.status) {
+    if ((update.status && existing.status !== update.status) || (update.adminComment !== undefined && existing.adminComment !== update.adminComment)) {
       await notifyReportUpdate({
         report,
         title: `Report status was updated to ${report.status}.`,
         textTitle: `Report ${report.referenceNo} was updated to ${report.status}.`,
+        actor,
+        comment: report.adminComment || '',
       });
     }
     return res.json(report);
@@ -157,7 +175,7 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
 
 router.patch('/:id/status', auth, requireRoles('admin', 'superadmin'), requireAdminPermission('reports', 'edit'), async (req, res) => {
   try {
-    const { status, adminChecked } = req.body;
+    const { status, adminChecked, adminComment } = req.body;
     if (status && !REPORT_STATUSES.includes(status)) {
       return res.status(400).json({ msg: 'Invalid status' });
     }
@@ -165,11 +183,18 @@ router.patch('/:id/status', auth, requireRoles('admin', 'superadmin'), requireAd
     const update = {};
     if (status) update.status = status;
     if (typeof adminChecked === 'boolean') update.adminChecked = adminChecked;
+    if (adminComment !== undefined) update.adminComment = String(adminComment || '').trim();
 
     const existing = await IssueReport.findById(req.params.id);
     if (!existing) {
       return res.status(404).json({ msg: 'Report not found' });
     }
+    const actor = await resolveActorDetails(req.user);
+    update.handledByName = actor.name;
+    update.handledByRole = actor.role;
+    update.handledAt = new Date();
+    update.handledByUser = mongoose.Types.ObjectId.isValid(actor.id) ? actor.id : null;
+
     const report = await IssueReport.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
 
     await logSystemEvent({
@@ -179,11 +204,13 @@ router.patch('/:id/status', auth, requireRoles('admin', 'superadmin'), requireAd
       referenceNo: report.referenceNo,
       metadata: { action: report.status === 'rejected' ? 'archive' : 'update', module: 'reports' },
     });
-    if (status && existing.status !== report.status) {
+    if ((status && existing.status !== report.status) || (adminComment !== undefined && existing.adminComment !== report.adminComment)) {
       await notifyReportUpdate({
         report,
         title: `Report status was updated to ${report.status}.`,
         textTitle: `Report ${report.referenceNo} was updated to ${report.status}.`,
+        actor,
+        comment: report.adminComment || '',
       });
     }
     return res.json(report);

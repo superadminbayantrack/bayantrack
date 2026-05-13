@@ -7,7 +7,7 @@ import EmergencyHotline from '../models/EmergencyHotline.js';
 import User from '../models/User.js';
 import { auth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
-import { getAdminNotificationRecipients, logSystemEvent, sendUserMail } from '../utils/notifications.js';
+import { getAdminNotificationRecipients, logSystemEvent, resolveActorDetails, sendUserMail } from '../utils/notifications.js';
 
 const router = express.Router();
 
@@ -143,14 +143,17 @@ function serviceRequestEmailHtml({ title, bodyLines = [] }) {
       <div style="padding:20px;color:#0f172a;">
         <p style="margin:0 0 12px;font-weight:700;">${title}</p>
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;">
-          ${bodyLines.map((line) => `<p style="margin:0 0 8px;">${line}</p>`).join('')}
+          ${bodyLines.filter(Boolean).map((line) => `<p style="margin:0 0 8px;">${line}</p>`).join('')}
         </div>
       </div>
     </div>
 </div>`;
 }
 
-async function notifyServiceRequestStatus({ item, residentUser, actorRole, note = '', title = 'A service request status was updated.' }) {
+async function notifyServiceRequestStatus({ item, residentUser, actor, actorRole, note = '', comment = '', title = 'A service request status was updated.' }) {
+  const handler = actor?.name
+    ? `${actor.name}${actor.role ? ` (${actor.role})` : ''}`
+    : (actorRole || 'Barangay staff');
   const residentRecipients = Array.from(new Set([
     residentUser?.email,
     ...((residentUser?.children || []).map((child) => String(child.email || '').trim()).filter(Boolean)),
@@ -160,8 +163,9 @@ async function notifyServiceRequestStatus({ item, residentUser, actorRole, note 
     `<strong>Reference:</strong> ${item.referenceNo}`,
     `<strong>Service:</strong> ${item.serviceType}`,
     `<strong>Updated status:</strong> ${item.status}`,
-    `<strong>Updated by:</strong> ${actorRole || 'system'}`,
+    `<strong>Handled by:</strong> ${handler}`,
     note ? `<strong>Note:</strong> ${note}` : '',
+    comment ? `<strong>Comment from the admins:</strong> ${comment}` : '',
   ].filter(Boolean);
 
   if (residentRecipients.length > 0) {
@@ -169,7 +173,7 @@ async function notifyServiceRequestStatus({ item, residentUser, actorRole, note 
       to: residentRecipients.join(','),
       subject: `Service Request ${item.referenceNo} Updated to ${item.status}`,
       html: serviceRequestEmailHtml({ title: 'Your service request status was updated.', bodyLines: statusLines }),
-      text: `Service request ${item.referenceNo} was updated to ${item.status}.${note ? ` Note: ${note}` : ''}`,
+      text: `Service request ${item.referenceNo} was updated to ${item.status}.\nHandled by: ${handler}${note ? `\nNote: ${note}` : ''}${comment ? `\nComment from the admins: ${comment}` : ''}`,
     });
   }
   if (adminRecipients.length > 0) {
@@ -177,7 +181,7 @@ async function notifyServiceRequestStatus({ item, residentUser, actorRole, note 
       to: adminRecipients.join(','),
       subject: `Service Request ${item.referenceNo} Status Updated`,
       html: serviceRequestEmailHtml({ title, bodyLines: statusLines }),
-      text: `Service request ${item.referenceNo} was updated to ${item.status} by ${actorRole || 'system'}.${note ? ` Note: ${note}` : ''}`,
+      text: `Service request ${item.referenceNo} was updated to ${item.status}.\nHandled by: ${handler}${note ? `\nNote: ${note}` : ''}${comment ? `\nComment from the admins: ${comment}` : ''}`,
     });
   }
 }
@@ -365,7 +369,7 @@ router.get('/requests', auth, requireRoles('admin', 'superadmin'), async (_req, 
 
 router.patch('/requests/:id/status', auth, requireRoles('admin', 'superadmin'), requireAdminPermission('serviceRequests', 'edit'), async (req, res) => {
   try {
-    const { status, note } = req.body;
+    const { status, note, adminComment } = req.body;
 
     if (status && !['pending', 'in-review', 'approved', 'rejected', 'completed'].includes(status)) {
       return res.status(400).json({ msg: 'Invalid status' });
@@ -376,12 +380,18 @@ router.patch('/requests/:id/status', auth, requireRoles('admin', 'superadmin'), 
       return res.status(404).json({ msg: 'Request not found' });
     }
     const residentUser = await User.findById(item.user).select('firstName lastName email children');
+    const actor = await resolveActorDetails(req.user);
 
     if (status) {
       const hasMongoActor = mongoose.Types.ObjectId.isValid(String(req.user.id || ''));
       item.status = status;
-      item.history.push({ status, by: hasMongoActor ? req.user.id : undefined, note: note || '' });
+      item.history.push({ status, by: hasMongoActor ? req.user.id : undefined, note: note || adminComment || '' });
     }
+    if (adminComment !== undefined) item.adminComment = String(adminComment || '').trim();
+    item.handledByName = actor.name;
+    item.handledByRole = actor.role;
+    item.handledAt = new Date();
+    item.handledByUser = mongoose.Types.ObjectId.isValid(actor.id) ? actor.id : null;
 
     await item.save();
 
@@ -393,7 +403,7 @@ router.patch('/requests/:id/status', auth, requireRoles('admin', 'superadmin'), 
       metadata: { byRole: req.user.role, action: item.status === 'rejected' ? 'archive' : 'update', module: 'service-requests', residentUser: item.user },
     });
 
-    await notifyServiceRequestStatus({ item, residentUser, actorRole: req.user.role, note });
+    await notifyServiceRequestStatus({ item, residentUser, actor, actorRole: req.user.role, note, comment: item.adminComment || '' });
 
     return res.json(item);
   } catch (err) {
@@ -404,7 +414,7 @@ router.patch('/requests/:id/status', auth, requireRoles('admin', 'superadmin'), 
 router.put('/requests/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermission('serviceRequests', 'edit'), async (req, res) => {
   try {
     const update = {};
-    ['serviceType', 'fullName', 'contactNumber', 'address', 'purpose', 'status'].forEach((key) => {
+    ['serviceType', 'fullName', 'contactNumber', 'address', 'purpose', 'status', 'adminComment'].forEach((key) => {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     });
     if (update.status && !['pending', 'in-review', 'approved', 'rejected', 'completed'].includes(update.status)) {
@@ -416,6 +426,12 @@ router.put('/requests/:id', auth, requireRoles('admin', 'superadmin'), requireAd
       return res.status(404).json({ msg: 'Request not found' });
     }
     const previousStatus = existing.status;
+    const previousComment = existing.adminComment || '';
+    const actor = await resolveActorDetails(req.user);
+    update.handledByName = actor.name;
+    update.handledByRole = actor.role;
+    update.handledAt = new Date();
+    update.handledByUser = mongoose.Types.ObjectId.isValid(actor.id) ? actor.id : null;
     const item = await ServiceRequest.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
     if (update.status && update.status !== previousStatus) {
       const hasMongoActor = mongoose.Types.ObjectId.isValid(String(req.user.id || ''));
@@ -430,9 +446,9 @@ router.put('/requests/:id', auth, requireRoles('admin', 'superadmin'), requireAd
       referenceNo: item.referenceNo,
       metadata: { action: 'update', module: 'service-requests', residentUser: item.user },
     });
-    if (update.status && update.status !== previousStatus) {
+    if ((update.status && update.status !== previousStatus) || (update.adminComment !== undefined && update.adminComment !== previousComment)) {
       const residentUser = await User.findById(item.user).select('firstName lastName email children');
-      await notifyServiceRequestStatus({ item, residentUser, actorRole: req.user.role, note: req.body.note || 'Updated from dashboard' });
+      await notifyServiceRequestStatus({ item, residentUser, actor, actorRole: req.user.role, note: req.body.note || 'Updated from dashboard', comment: item.adminComment || '' });
     }
     return res.json(item);
   } catch (_err) {

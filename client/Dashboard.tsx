@@ -49,7 +49,7 @@ export default function SuperAdminDashboard() {
               <h3 className="font-bold text-slate-300 group-hover:text-white">System Logs</h3>
               <Database className="text-emerald-500" />
             </div>
-            <p className="text-sm text-slate-400">View database activity, user logins, and system errors.</p>
+            <p className="text-sm text-slate-400">View recent activity, user logins, and system alerts.</p>
           </div>
 
           {/* Card 3 */}

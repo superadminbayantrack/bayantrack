@@ -11,6 +11,7 @@ import { getAdminNotificationRecipients, logSystemEvent, sendUserMail } from '..
 import { findEmbeddedAccount, getEmbeddedAccountById } from '../config/embeddedAccounts.js';
 
 const router = express.Router();
+const AUTH_TOKEN_TTL = process.env.AUTH_TOKEN_TTL || '7d';
 const ALLOWED_BARANGAY_KEYWORDS = ['mambog ii', 'mambog 2'];
 const ALLOWED_CITY_KEYWORDS = ['bacoor'];
 const ALLOWED_PROVINCE_KEYWORDS = ['cavite'];
@@ -180,7 +181,7 @@ function registrationWelcomeHtml({ firstName, fullName }) {
         <p style="margin:0 0 10px;">Hi <strong>${firstName || 'Resident'}</strong>,</p>
         <p style="margin:0 0 12px;line-height:1.6;">
           Thank you for registering with BayanTrack. Your account has been received and is now
-          waiting for superadmin approval.
+          waiting for barangay approval.
         </p>
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin:14px 0;">
           <p style="margin:0;font-size:12px;color:#475569;">Registered Name</p>
@@ -551,7 +552,7 @@ router.post('/register', async (req, res) => {
       metadata: { module: 'auth', action: 'register', status: 'pending', residentEmail: normalizedEmail },
     });
 
-    res.send('Registration submitted. Awaiting superadmin approval.');
+    res.send('Registration submitted. Awaiting barangay approval.');
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server error');
@@ -572,7 +573,7 @@ router.post('/login', async (req, res) => {
           id: embeddedAccount.id,
         },
       };
-      return jwt.sign(payload, process.env.JWT_SECRET || 'secrettoken', { expiresIn: 3600 }, (err, token) => {
+      return jwt.sign(payload, process.env.JWT_SECRET || 'secrettoken', { expiresIn: AUTH_TOKEN_TTL }, (err, token) => {
         if (err) throw err;
         return res.json({ token, role: embeddedAccount.role, actingChild: null });
       });
@@ -641,9 +642,9 @@ router.post('/login', async (req, res) => {
     // superadmin account must always be login-capable even if status is not active
     if (user.role !== 'superadmin' && user.status !== 'active') {
       if (user.status === 'suspended') {
-        return res.status(403).json({ msg: 'This account was archived by superadmin. Contact support or use Forgot Password.' });
+        return res.status(403).json({ msg: 'This account was archived by a barangay administrator. Contact support or use Forgot Password.' });
       }
-      return res.status(403).json({ msg: 'Account is pending approval by superadmin.' });
+      return res.status(403).json({ msg: 'Account is pending barangay approval.' });
     }
 
     if (user.failedLoginAttempts || user.lockUntil) {
@@ -665,7 +666,7 @@ router.post('/login', async (req, res) => {
         } : {}),
       },
     };
-    jwt.sign(payload, process.env.JWT_SECRET || 'secrettoken', { expiresIn: 3600 }, (err, token) => {
+    jwt.sign(payload, process.env.JWT_SECRET || 'secrettoken', { expiresIn: AUTH_TOKEN_TTL }, (err, token) => {
       if (err) throw err;
       res.json({ token, role: user.role, actingChild });
     });
@@ -1018,7 +1019,7 @@ router.post('/child-access/request-otp', auth, async (req, res) => {
     const otpMail = {
       firstName: user.firstName,
       title: 'Child Access OTP',
-      intro: 'Use this one-time password to submit a child access request for superadmin review.',
+      intro: 'Use this one-time password to submit a child access request for barangay review.',
       otp,
       label: 'Child Access OTP',
       details: [
@@ -1112,7 +1113,7 @@ router.post('/child-access/verify', auth, async (req, res) => {
       });
     }
 
-    return res.json({ msg: 'Child access request submitted and is now pending superadmin approval.', children: user.children });
+    return res.json({ msg: 'Child access request submitted and is now pending barangay approval.', children: user.children });
   } catch (err) {
     console.error(err.message);
     return res.status(500).json({ msg: 'Failed to verify child access request.' });

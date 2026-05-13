@@ -23,6 +23,11 @@ const SubscriptionSchema = new mongoose.Schema(
       ref: 'User',
       default: null,
     },
+    adminComment: { type: String, default: '' },
+    handledByUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    handledByName: { type: String, default: '' },
+    handledByRole: { type: String, default: '' },
+    handledAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

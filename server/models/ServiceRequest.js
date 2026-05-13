@@ -17,6 +17,11 @@ const ServiceRequestSchema = new mongoose.Schema(
       default: 'pending',
     },
     referenceNo: { type: String, required: true, unique: true },
+    adminComment: { type: String, default: '' },
+    handledByUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    handledByName: { type: String, default: '' },
+    handledByRole: { type: String, default: '' },
+    handledAt: { type: Date, default: null },
     history: [
       {
         status: String,

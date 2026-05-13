@@ -36,13 +36,13 @@ let dbInitPromise = null;
 function getBootstrapAccounts() {
   return [
     {
-      username: process.env.BOOTSTRAP_ADMIN_USERNAME || 'admin123',
-      password: process.env.BOOTSTRAP_ADMIN_PASSWORD || 'admin123',
+      username: process.env.BOOTSTRAP_ADMIN_USERNAME || 'admin',
+      password: process.env.BOOTSTRAP_ADMIN_PASSWORD || 'admin',
       role: 'admin',
       firstName: 'Admin',
-      lastName: 'User',
-      email: process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@bayantrack.com',
-      contactNumber: process.env.BOOTSTRAP_ADMIN_CONTACT || '00000000000',
+      lastName: 'Bayan Track',
+      email: process.env.BOOTSTRAP_ADMIN_EMAIL || 'adminbayantrack@gmail.com',
+      contactNumber: process.env.BOOTSTRAP_ADMIN_CONTACT || '00000000002',
       address: 'Barangay Hall',
     },
     {
@@ -84,6 +84,17 @@ function getMongoConnectionOptions(uri) {
   }
 
   return undefined;
+}
+
+async function removeLegacyBootstrapAccounts() {
+  await User.deleteMany({
+    role: 'admin',
+    $or: [
+      { email: 'admin@bayantrack.com' },
+      { username: 'admin123' },
+      { contactNumber: '00000000000' },
+    ],
+  });
 }
 
 async function ensureMongoConnected(uri) {
@@ -167,6 +178,8 @@ async function connectAndSeed() {
   await ensureMongoConnected(uri);
 
   if (dbInitialized) return;
+
+  await removeLegacyBootstrapAccounts();
 
   for (const account of getBootstrapAccounts()) {
     await repairBootstrapAccount(account);

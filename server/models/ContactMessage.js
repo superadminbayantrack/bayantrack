@@ -9,6 +9,11 @@ const ContactMessageSchema = new mongoose.Schema(
     message: { type: String, required: true },
     referenceNo: { type: String, required: true, unique: true },
     status: { type: String, enum: ['new', 'read', 'closed'], default: 'new' },
+    adminComment: { type: String, default: '' },
+    handledByUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    handledByName: { type: String, default: '' },
+    handledByRole: { type: String, default: '' },
+    handledAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

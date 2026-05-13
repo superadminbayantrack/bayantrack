@@ -4,7 +4,7 @@ import Department from '../models/Department.js';
 import ContactMessage from '../models/ContactMessage.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
-import { getAdminNotificationRecipients, logSystemEvent, sendUserMail } from '../utils/notifications.js';
+import { getAdminNotificationRecipients, logSystemEvent, resolveActorDetails, sendUserMail } from '../utils/notifications.js';
 
 const router = express.Router();
 const MESSAGE_STATUSES = ['new', 'read', 'closed'];
@@ -23,21 +23,32 @@ function messageEmailHtml({ title, lines = [] }) {
       <div style="padding:20px;color:#0f172a;">
         <p style="margin:0 0 12px;font-weight:700;">${title}</p>
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;">
-          ${lines.map((line) => `<p style="margin:0 0 8px;">${line}</p>`).join('')}
+          ${lines.filter(Boolean).map((line) => `<p style="margin:0 0 8px;">${line}</p>`).join('')}
         </div>
       </div>
     </div>
   </div>`;
 }
 
-async function notifyMessageUpdate({ message, title, textTitle }) {
+async function notifyMessageUpdate({ message, title, textTitle, actor, comment = '' }) {
+  const handler = actor?.name ? `${actor.name}${actor.role ? ` (${actor.role})` : ''}` : '';
   const lines = [
     `<strong>Reference:</strong> ${message.referenceNo}`,
     `<strong>Sender:</strong> ${message.name}`,
     `<strong>Department:</strong> ${message.department}`,
     `<strong>Status:</strong> ${message.status}`,
+    handler ? `<strong>Handled by:</strong> ${handler}` : '',
+    comment ? `<strong>Comment from the admins:</strong> ${comment}` : '',
   ];
-  const text = `${textTitle}\nReference: ${message.referenceNo}\nSender: ${message.name}\nDepartment: ${message.department}\nStatus: ${message.status}`;
+  const text = [
+    textTitle,
+    `Reference: ${message.referenceNo}`,
+    `Sender: ${message.name}`,
+    `Department: ${message.department}`,
+    `Status: ${message.status}`,
+    handler ? `Handled by: ${handler}` : '',
+    comment ? `Comment from the admins: ${comment}` : '',
+  ].filter(Boolean).join('\n');
   const adminRecipients = await getAdminNotificationRecipients();
   if (adminRecipients.length > 0) {
     await sendUserMail({
@@ -162,12 +173,20 @@ router.get('/messages', auth, requireRoles('admin', 'superadmin'), async (req, r
 
 router.patch('/messages/:id/status', auth, requireRoles('admin', 'superadmin'), requireAdminPermission('messages', 'edit'), async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, adminComment } = req.body;
     if (!MESSAGE_STATUSES.includes(status)) {
       return res.status(400).json({ msg: 'Invalid status' });
     }
 
-    const updated = await ContactMessage.findByIdAndUpdate(req.params.id, { status }, { returnDocument: 'after' });
+    const actor = await resolveActorDetails(req.user);
+    const updated = await ContactMessage.findByIdAndUpdate(req.params.id, {
+      status,
+      ...(adminComment !== undefined ? { adminComment: String(adminComment || '').trim() } : {}),
+      handledByName: actor.name,
+      handledByRole: actor.role,
+      handledAt: new Date(),
+      handledByUser: mongoose.Types.ObjectId.isValid(actor.id) ? actor.id : null,
+    }, { returnDocument: 'after' });
     if (!updated) {
       return res.status(404).json({ msg: 'Message not found' });
     }
@@ -183,6 +202,8 @@ router.patch('/messages/:id/status', auth, requireRoles('admin', 'superadmin'), 
       message: updated,
       title: `Message status was updated to ${status}.`,
       textTitle: `Message ${updated.referenceNo} was updated to ${status}.`,
+      actor,
+      comment: updated.adminComment || '',
     });
     return res.json(updated);
   } catch (err) {
@@ -193,7 +214,7 @@ router.patch('/messages/:id/status', auth, requireRoles('admin', 'superadmin'), 
 router.put('/messages/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermission('messages', 'edit'), async (req, res) => {
   try {
     const update = {};
-    ['name', 'contact', 'department', 'message', 'status'].forEach((key) => {
+    ['name', 'contact', 'department', 'message', 'status', 'adminComment'].forEach((key) => {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     });
     if (update.status && !MESSAGE_STATUSES.includes(update.status)) {
@@ -204,6 +225,11 @@ router.put('/messages/:id', auth, requireRoles('admin', 'superadmin'), requireAd
     if (!existing) {
       return res.status(404).json({ msg: 'Message not found' });
     }
+    const actor = await resolveActorDetails(req.user);
+    update.handledByName = actor.name;
+    update.handledByRole = actor.role;
+    update.handledAt = new Date();
+    update.handledByUser = mongoose.Types.ObjectId.isValid(actor.id) ? actor.id : null;
     const updated = await ContactMessage.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
 
     await logSystemEvent({
@@ -213,11 +239,13 @@ router.put('/messages/:id', auth, requireRoles('admin', 'superadmin'), requireAd
       referenceNo: updated.referenceNo,
       metadata: { action: 'update', module: 'messages' },
     });
-    if (update.status && update.status !== existing.status) {
+    if ((update.status && update.status !== existing.status) || (update.adminComment !== undefined && update.adminComment !== existing.adminComment)) {
       await notifyMessageUpdate({
         message: updated,
         title: `Message status was updated to ${updated.status}.`,
         textTitle: `Message ${updated.referenceNo} was updated to ${updated.status}.`,
+        actor,
+        comment: updated.adminComment || '',
       });
     }
     return res.json(updated);
