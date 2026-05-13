@@ -1,4 +1,4 @@
-import { createServer } from "../server/index.ts";
+import { createServer } from "../server/index.js";
 
 const app = createServer();
 
