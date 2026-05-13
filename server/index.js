@@ -4,6 +4,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import authRoutes from './routes/auth.js';
 import announcementsRoutes from './routes/announcements.js';
 import servicesRoutes from './routes/services.js';
@@ -17,6 +18,8 @@ import User from './models/User.js';
 import Department from './models/Department.js';
 import Announcement from './models/Announcement.js';
 import Official from './models/Official.js';
+import SystemSetting from './models/SystemSetting.js';
+import { getEmbeddedAccountById } from './config/embeddedAccounts.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -273,6 +276,56 @@ async function ensureDatabaseReady() {
   await dbInitPromise;
 }
 
+function getRequestToken(req) {
+  const headerToken = req.header('x-auth-token');
+  const bearerToken = req.header('authorization')?.startsWith('Bearer ')
+    ? req.header('authorization').replace('Bearer ', '')
+    : null;
+  return headerToken || bearerToken || '';
+}
+
+async function isAdminRequest(req) {
+  const token = getRequestToken(req);
+  if (!token) return false;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secrettoken');
+    const userId = decoded?.user?.id;
+    const embeddedAccount = getEmbeddedAccountById(userId);
+    if (embeddedAccount) {
+      return ['admin', 'superadmin'].includes(embeddedAccount.role);
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(userId || ''))) return false;
+    const user = await User.findById(userId).select('role status').lean();
+    return Boolean(user && user.status === 'active' && ['admin', 'superadmin'].includes(user.role));
+  } catch (_err) {
+    return false;
+  }
+}
+
+async function enforceMaintenanceMode(req, res, next) {
+  if (req.path === '/ping' || req.path.startsWith('/admin') || req.path === '/auth/login') {
+    return next();
+  }
+
+  const settings = await SystemSetting.findOne()
+    .select('maintenanceMode maintenanceMessage')
+    .lean();
+
+  if (!settings?.maintenanceMode) {
+    return next();
+  }
+
+  if (await isAdminRequest(req)) {
+    return next();
+  }
+
+  return res.status(503).json({
+    msg: settings.maintenanceMessage || 'The resident portal is temporarily under maintenance. Please try again later.',
+  });
+}
+
 export function createServer() {
   const app = express();
 
@@ -361,6 +414,7 @@ export function createServer() {
       next(err);
     }
   });
+  app.use('/api', enforceMaintenanceMode);
 
   app.use('/api/auth', authRoutes);
   app.use('/api/announcements', announcementsRoutes);

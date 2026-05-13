@@ -1,7 +1,7 @@
 ﻿
 import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, FileText, LayoutDashboard, LogOut, Mail, Pencil, RotateCcw, Search, Settings, Shield, Trash2, UserCog, UserX, Users, X } from "lucide-react";
+import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, Pencil, RotateCcw, Search, Settings, Shield, Trash2, UserCog, UserX, Users, X } from "lucide-react";
 import { clearAuthSession, type UserRole } from "@/lib/auth";
 import { api, authHeaders } from "@/lib/api";
 import { LogoutConfirmation } from "@/components/LogoutConfirmation";
@@ -43,7 +43,7 @@ type ActivityItem = {
   userRole?: string;
   metadata?: { module?: string; action?: string; [key: string]: any };
 };
-type SystemSettings = { autoArchiveReports: boolean; requireAnnouncementReview: boolean; emailDigest: boolean; allowResidentRegistration: boolean; maintenanceMode: boolean; maintenanceMessage: string; sessionTimeoutMinutes: number; lockoutWindowMinutes: number; developerOptionsEnabled: boolean; };
+type SystemSettings = { autoArchiveReports: boolean; requireAnnouncementReview: boolean; emailDigest: boolean; allowResidentRegistration: boolean; maintenanceMode: boolean; maintenanceMessage: string; sessionTimeoutMinutes: number; lockoutWindowMinutes: number; developerOptionsEnabled: boolean; notificationRecipientMode: "all" | "superadmin" | "admin"; };
 type SiteContent = {
   navbarBrandText: string;
   heroEyebrow: string;
@@ -461,6 +461,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [showClosedMessagesModal, setShowClosedMessagesModal] = useState(false);
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [userEditModal, setUserEditModal] = useState<(Partial<UserItem> & { password?: string }) | null>(null);
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
   const [addReportOpen, setAddReportOpen] = useState(false);
   const [addServiceOpen, setAddServiceOpen] = useState(false);
   const [addMessageOpen, setAddMessageOpen] = useState(false);
@@ -505,8 +506,9 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [newService, setNewService] = useState({ serviceType: "Barangay Clearance", fullName: "", contactNumber: "", address: "", purpose: "" });
   const [newMessage, setNewMessage] = useState({ name: "", contact: "", department: "Office of the Captain", message: "" });
   const [newSubscriber, setNewSubscriber] = useState({ email: "", source: "dashboard" });
-  const [systemSettings, setSystemSettings] = useState<SystemSettings>({ autoArchiveReports: true, requireAnnouncementReview: false, emailDigest: true, allowResidentRegistration: true, maintenanceMode: false, maintenanceMessage: "", sessionTimeoutMinutes: 60, lockoutWindowMinutes: 15, developerOptionsEnabled: false });
-  const [savedSystemSettings, setSavedSystemSettings] = useState<SystemSettings>({ autoArchiveReports: true, requireAnnouncementReview: false, emailDigest: true, allowResidentRegistration: true, maintenanceMode: false, maintenanceMessage: "", sessionTimeoutMinutes: 60, lockoutWindowMinutes: 15, developerOptionsEnabled: false });
+  const defaultSystemSettings: SystemSettings = { autoArchiveReports: true, requireAnnouncementReview: false, emailDigest: true, allowResidentRegistration: true, maintenanceMode: false, maintenanceMessage: "", sessionTimeoutMinutes: 60, lockoutWindowMinutes: 15, developerOptionsEnabled: false, notificationRecipientMode: "all" };
+  const [systemSettings, setSystemSettings] = useState<SystemSettings>(defaultSystemSettings);
+  const [savedSystemSettings, setSavedSystemSettings] = useState<SystemSettings>(defaultSystemSettings);
   const [siteContent, setSiteContent] = useState<SiteContent>({
     navbarBrandText: "BAYANTRACK +",
     heroEyebrow: "Official Government Portal",
@@ -829,6 +831,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     { value: "streetlight-defect", label: "Streetlight Defect" },
     { value: "noise-complaint", label: "Noise Complaint" },
     { value: "suspicious-activity", label: "Suspicious Activity" },
+    { value: "misinformation-rumor", label: "Misinformation / Rumor" },
     { value: "stray-animal", label: "Stray Animal" },
   ];
   const userCategoryOptions = [
@@ -1242,17 +1245,24 @@ export default function RoleDashboard({ role }: DashboardProps) {
   };
 
   async function updateUserStatusDirect(target: UserItem, nextStatus: UserItem["status"], nextValidIdStatus: "pending" | "approved" | "rejected", reason = "", nextRole?: string) {
-    await runActionWithFeedback(
-      nextStatus === "active" ? "User approved" : nextStatus === "suspended" ? "User rejected" : "User updated",
-      () => api.patch(`/api/admin/users/${target._id}/status`, {
-        status: nextStatus,
-        validIdStatus: nextValidIdStatus,
-        reason,
-        ...(canManage ? { role: nextRole || target.role } : {}),
-      }, { headers: authHeaders() }),
-    );
+    setActionLoading(true);
     setReviewUserPrompt(null);
-    setSelectedUser(null);
+    try {
+      await runActionWithFeedback(
+        nextStatus === "active" ? "User approved" : nextStatus === "suspended" ? "User rejected" : "User updated",
+        () => api.patch(`/api/admin/users/${target._id}/status`, {
+          status: nextStatus,
+          validIdStatus: nextValidIdStatus,
+          reason,
+          ...(canManage ? { role: nextRole || target.role } : {}),
+        }, { headers: authHeaders() }),
+      );
+      setSelectedUser(null);
+    } catch (err: any) {
+      setFeedback({ type: "error", title: "Action failed", message: err?.response?.data?.msg || "Please try again." });
+    } finally {
+      setActionLoading(false);
+    }
   }
 
   function openUserReasonPrompt(prompt: UserReasonPrompt) {
@@ -1642,7 +1652,6 @@ export default function RoleDashboard({ role }: DashboardProps) {
               </div>
               {!isSidebarCollapsed ? (
                 <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Brand Logo</p>
                   <p className="truncate text-sm font-bold text-slate-900">Superadmin Dashboard</p>
                   <p className="truncate text-xs text-slate-500">BayanTrack Admin Panel</p>
                 </div>
@@ -2562,6 +2571,20 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     <label className="flex items-center justify-between gap-2 rounded border p-3 text-sm"><span>Require Announcement Review</span><input type="checkbox" checked={systemSettings.requireAnnouncementReview} disabled={!canManage} onChange={(e) => setSystemSettings((p) => ({ ...p, requireAnnouncementReview: e.target.checked }))} /></label>
                     <label className="flex items-center justify-between gap-2 rounded border p-3 text-sm"><span>Email Digest</span><input type="checkbox" checked={systemSettings.emailDigest} disabled={!canManage} onChange={(e) => setSystemSettings((p) => ({ ...p, emailDigest: e.target.checked }))} /></label>
                     <label className="flex items-center justify-between gap-2 rounded border p-3 text-sm"><span>Login Lockout Window (minutes)</span><input className={`${inputBase} w-20 px-2 py-1 text-xs`} type="number" min={5} value={systemSettings.lockoutWindowMinutes} disabled={!canManage} onChange={(e) => setSystemSettings((p) => ({ ...p, lockoutWindowMinutes: Number(e.target.value) || 15 }))} /></label>
+                    <label className="md:col-span-2 text-sm">
+                      <span className="mb-1 block font-medium">Email Notifications Sent To</span>
+                      <select
+                        className={inputBase}
+                        value={systemSettings.notificationRecipientMode}
+                        disabled={!canManage || !systemSettings.emailDigest}
+                        onChange={(e) => setSystemSettings((p) => ({ ...p, notificationRecipientMode: e.target.value as SystemSettings["notificationRecipientMode"] }))}
+                      >
+                        <option value="all">Admins and Superadmins</option>
+                        <option value="superadmin">Superadmin only</option>
+                        <option value="admin">Admins only</option>
+                      </select>
+                      <span className="mt-1 block text-xs text-slate-500">This controls who receives automatic staff email updates from reports, messages, registrations, services, and system events.</span>
+                    </label>
                     <label className="md:col-span-2 text-sm"><span className="mb-1 block font-medium">Maintenance Message</span><textarea className="w-full rounded border p-2 text-sm" rows={2} value={systemSettings.maintenanceMessage} disabled={!canManage} onChange={(e) => setSystemSettings((p) => ({ ...p, maintenanceMessage: e.target.value }))} /></label>
                   </div>
                   <div className="mt-6 border-t pt-4">
@@ -2914,10 +2937,23 @@ export default function RoleDashboard({ role }: DashboardProps) {
       {addUserOpen && (
         <div className={modalOverlay}>
           <div className={`${modalCard} max-w-3xl`}>
-            <div className="mb-3 flex items-center justify-between"><h3 className="text-lg font-bold">Create User</h3><button onClick={() => setAddUserOpen(false)} type="button"><X size={18} /></button></div>
+            <div className="mb-3 flex items-center justify-between"><h3 className="text-lg font-bold">Create User</h3><button onClick={() => { setAddUserOpen(false); setShowNewUserPassword(false); }} type="button"><X size={18} /></button></div>
             <div className="grid gap-3 lg:grid-cols-2 [&_input]:w-full [&_select]:w-full">
               <LabeledField label="Username"><input className={inputBase} value={newUser.username} onChange={(e) => setNewUser((p) => ({ ...p, username: e.target.value }))} /></LabeledField>
-              <LabeledField label="Temporary Password"><input className={inputBase} type="password" value={newUser.password} onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))} /></LabeledField>
+              <LabeledField label="Temporary Password">
+                <div className="relative">
+                  <input className={`${inputBase} pr-11`} type={showNewUserPassword ? "text" : "password"} value={newUser.password} onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))} />
+                  <button
+                    className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                    onClick={() => setShowNewUserPassword((value) => !value)}
+                    type="button"
+                    title={showNewUserPassword ? "Hide password" : "Show password"}
+                    aria-label={showNewUserPassword ? "Hide temporary password" : "Show temporary password"}
+                  >
+                    {showNewUserPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </LabeledField>
               <LabeledField label="First Name"><input className={inputBase} value={newUser.firstName} onChange={(e) => setNewUser((p) => ({ ...p, firstName: e.target.value }))} /></LabeledField>
               <LabeledField label="Middle Name"><input className={inputBase} value={newUser.middleName} onChange={(e) => setNewUser((p) => ({ ...p, middleName: e.target.value }))} /></LabeledField>
               <LabeledField label="Last Name"><input className={inputBase} value={newUser.lastName} onChange={(e) => setNewUser((p) => ({ ...p, lastName: e.target.value }))} /></LabeledField>
@@ -2927,7 +2963,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Status"><select className={inputBase} value={newUser.status} onChange={(e) => setNewUser((p) => ({ ...p, status: e.target.value }))}><option value="active">active</option><option value="pending">pending</option><option value="suspended">suspended</option></select></LabeledField>
               <LabeledField label="Address" className="lg:col-span-2"><input className={inputBase} value={newUser.address} onChange={(e) => setNewUser((p) => ({ ...p, address: e.target.value }))} placeholder="Mambog II, Bacoor, Cavite" /></LabeledField>
             </div>
-            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Create User", message: "Create this user account?", confirmLabel: "Create", run: () => runActionWithFeedback("User created", () => api.post("/api/admin/users", newUser, { headers: authHeaders() }).then(() => { setAddUserOpen(false); setNewUser({ username: "", firstName: "", middleName: "", lastName: "", email: "", contactNumber: "", address: "", role: "resident", status: "active", password: "" }); })) })} type="button">Create User</button>
+            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Create User", message: "Create this user account?", confirmLabel: "Create", run: () => runActionWithFeedback("User created", () => api.post("/api/admin/users", newUser, { headers: authHeaders() }).then(() => { setAddUserOpen(false); setShowNewUserPassword(false); setNewUser({ username: "", firstName: "", middleName: "", lastName: "", email: "", contactNumber: "", address: "", role: "resident", status: "active", password: "" }); })) })} type="button">Create User</button>
           </div>
         </div>
       )}
@@ -3954,7 +3990,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
             <h3 className="text-lg font-bold text-slate-900">Review User Details</h3>
             <p className="mt-2 text-sm text-slate-600">Double-check the resident details, then choose approve or reject.</p>
             <div className="mt-6 flex gap-3">
-              <button className={`${btnSecondary} flex-1 text-sm`} onClick={() => setReviewUserPrompt(null)} type="button">Cancel</button>
+              <button className={`${btnSecondary} flex-1 text-sm`} onClick={() => setReviewUserPrompt(null)} disabled={actionLoading} type="button">Cancel</button>
               <button
                 className={`${btnDanger} flex-1 text-sm`}
                 onClick={() => {
@@ -3962,6 +3998,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   setReviewUserPrompt(null);
                   openUserReasonPrompt({ kind: "user-status", title: "Reject User", userId: target._id, username: target.username, nextStatus: "suspended", validIdStatus: "rejected" });
                 }}
+                disabled={actionLoading}
                 type="button"
               >
                 Reject
@@ -3972,9 +4009,10 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   const target = reviewUserPrompt;
                   void updateUserStatusDirect(target, "active", "approved");
                 }}
+                disabled={actionLoading}
                 type="button"
               >
-                Approve
+                {actionLoading ? "Saving..." : "Approve"}
               </button>
             </div>
           </div>

@@ -14,6 +14,7 @@ import Subscription from '../models/Subscription.js';
 import SystemSetting from '../models/SystemSetting.js';
 import { auth, requireRoles } from '../middleware/auth.js';
 import { logSystemEvent, sendUserMail } from '../utils/notifications.js';
+import { isReservedEmbeddedIdentity } from '../config/embeddedAccounts.js';
 
 const router = express.Router();
 const DAILY_ACTIVITY_DIR = path.join(os.tmpdir(), 'bayantrack-daily-activity');
@@ -146,6 +147,17 @@ function buildUserFields(body, { includePassword = false } = {}) {
   }
   if (includePassword && body.password) fields.password = body.password;
   return fields;
+}
+
+function isResidentUsingStaffIdentity(fields = {}, existing = {}) {
+  const nextRole = fields.role || existing.role || 'resident';
+  if (nextRole !== 'resident') return false;
+
+  return isReservedEmbeddedIdentity({
+    username: fields.username ?? existing.username,
+    email: fields.email ?? existing.email,
+    contactNumber: fields.contactNumber ?? existing.contactNumber,
+  });
 }
 
 function accountApprovedHtml({ firstName, fullName }) {
@@ -315,6 +327,11 @@ router.post('/users', auth, requireRoles('superadmin'), async (req, res) => {
     fields.address = fields.address || composeUserAddress(fields.addressDetails, 'Mambog II, Bacoor, Cavite 4102');
     fields.status = fields.status || 'active';
     fields.validIdStatus = fields.validIdStatus || (fields.status === 'active' ? 'approved' : 'pending');
+
+    if (isResidentUsingStaffIdentity(fields)) {
+      return res.status(400).json({ msg: 'These login details are reserved for barangay staff. Use a different resident email, username, or contact number.' });
+    }
+
     const salt = await bcrypt.genSalt(10);
     fields.password = await bcrypt.hash(fields.password, salt);
 
@@ -350,6 +367,10 @@ router.put('/users/:id', auth, requireRoles('superadmin'), async (req, res) => {
       if (fields.status === 'active') fields.validIdStatus = 'approved';
       if (fields.status === 'pending') fields.validIdStatus = 'pending';
       if (fields.status === 'suspended') fields.validIdStatus = 'rejected';
+    }
+
+    if (isResidentUsingStaffIdentity(fields, existing)) {
+      return res.status(400).json({ msg: 'These login details are reserved for barangay staff. Use a different resident email, username, or contact number.' });
     }
 
     const uniqueClauses = [];
@@ -407,6 +428,9 @@ router.patch('/users/:id/status', auth, requireRoles('admin', 'superadmin'), asy
     }
     if (validIdStatus && ['pending', 'approved', 'rejected'].includes(validIdStatus)) {
       update.validIdStatus = validIdStatus;
+    }
+    if ((status === 'active' || validIdStatus === 'approved') && isResidentUsingStaffIdentity(update, previousUser)) {
+      return res.status(400).json({ msg: 'This resident account uses staff login details. Please change the resident email, username, or contact number before approval.' });
     }
     if (status === 'active') {
       update.validIdStatus = 'approved';
@@ -721,6 +745,7 @@ router.patch('/system-settings', auth, requireRoles('superadmin'), async (req, r
       'sessionTimeoutMinutes',
       'lockoutWindowMinutes',
       'developerOptionsEnabled',
+      'notificationRecipientMode',
     ];
     const update = {};
     for (const key of allowed) {

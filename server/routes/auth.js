@@ -8,7 +8,7 @@ import SystemSetting from '../models/SystemSetting.js';
 import ServiceRequest from '../models/ServiceRequest.js';
 import { auth } from '../middleware/auth.js';
 import { getAdminNotificationRecipients, logSystemEvent, sendUserMail } from '../utils/notifications.js';
-import { findEmbeddedAccount, getEmbeddedAccountById } from '../config/embeddedAccounts.js';
+import { findEmbeddedAccount, getEmbeddedAccountById, isReservedEmbeddedIdentity } from '../config/embeddedAccounts.js';
 
 const router = express.Router();
 const AUTH_TOKEN_TTL = process.env.AUTH_TOKEN_TTL || '7d';
@@ -167,6 +167,10 @@ function isStrongPassword(value) {
 async function readSystemSettings() {
   const settings = await SystemSetting.findOne();
   return settings || { allowResidentRegistration: true, lockoutWindowMinutes: 15 };
+}
+
+function maintenanceMessage(settings) {
+  return settings?.maintenanceMessage || 'The resident portal is temporarily under maintenance. Please try again later.';
 }
 
 function registrationWelcomeHtml({ firstName, fullName }) {
@@ -332,6 +336,9 @@ router.post('/send-otp', async (req, res) => {
 
   try {
     const settings = await readSystemSettings();
+    if (settings.maintenanceMode) {
+      return res.status(503).json({ msg: maintenanceMessage(settings) });
+    }
     if (!settings.allowResidentRegistration) {
       return res.status(403).json({ msg: 'Resident registration is temporarily disabled by system settings.' });
     }
@@ -340,6 +347,9 @@ router.post('/send-otp', async (req, res) => {
     const normalizedEmail = String(email || '').trim().toLowerCase();
     if (!normalizedEmail) {
       return res.status(400).json({ msg: 'Email is required.' });
+    }
+    if (isReservedEmbeddedIdentity({ email: normalizedEmail })) {
+      return res.status(400).json({ msg: 'This email is reserved for barangay staff login. Please use a different resident email.' });
     }
 
     let user = await User.findOne({ email: normalizedEmail });
@@ -392,12 +402,18 @@ router.post('/register/check', async (req, res) => {
   const { username, email, contactNumber, address, addressDetails } = req.body;
   try {
     const settings = await readSystemSettings();
+    if (settings.maintenanceMode) {
+      return res.status(503).json({ msg: maintenanceMessage(settings) });
+    }
     if (!settings.allowResidentRegistration) {
       return res.status(403).json({ msg: 'Resident registration is temporarily disabled by system settings.' });
     }
 
     if (!username || !email || !contactNumber) {
       return res.status(400).json({ msg: 'Username, email, and phone number are required.' });
+    }
+    if (isReservedEmbeddedIdentity({ username, email, contactNumber })) {
+      return res.status(400).json({ msg: 'These login details are reserved for barangay staff. Please use different resident details.' });
     }
 
     const normalizedAddress = normalizeAddressDetails(addressDetails);
@@ -450,12 +466,18 @@ router.post('/register', async (req, res) => {
 
   try {
     const settings = await readSystemSettings();
+    if (settings.maintenanceMode) {
+      return res.status(503).json({ msg: maintenanceMessage(settings) });
+    }
     if (!settings.allowResidentRegistration) {
       return res.status(403).json({ msg: 'Resident registration is temporarily disabled by system settings.' });
     }
 
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const normalizedAddress = normalizeAddressDetails(addressDetails);
+    if (isReservedEmbeddedIdentity({ username, email: normalizedEmail, contactNumber })) {
+      return res.status(400).json({ msg: 'These login details are reserved for barangay staff. Please use different resident details.' });
+    }
 
     // Verify OTP
     const validOtp = await Otp.findOne({ email: normalizedEmail, otp: String(otp || '').trim() });
@@ -617,6 +639,10 @@ router.post('/login', async (req, res) => {
       return res.status(404).json({ msg: 'Account is not registered yet or may have been deleted.' });
     }
 
+    if (user.role === 'resident' && isReservedEmbeddedIdentity({ username: user.username, email: user.email, contactNumber: user.contactNumber })) {
+      return res.status(403).json({ msg: 'These login details are reserved for barangay staff. Please use the staff login account or register with a different resident email.' });
+    }
+
     if (user.lockUntil && user.lockUntil > new Date()) {
       return res.status(423).json({
         msg: 'Too many failed login attempts. Please use Forgot Password (OTP) or try again later.',
@@ -637,6 +663,10 @@ router.post('/login', async (req, res) => {
         });
       }
       return res.status(400).json({ msg: 'Invalid Credentials' });
+    }
+
+    if (settings.maintenanceMode && user.role === 'resident') {
+      return res.status(503).json({ msg: maintenanceMessage(settings) });
     }
 
     // superadmin account must always be login-capable even if status is not active

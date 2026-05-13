@@ -2,12 +2,14 @@ import express from 'express';
 import mongoose from 'mongoose';
 import IssueReport from '../models/IssueReport.js';
 import User from '../models/User.js';
+import SystemSetting from '../models/SystemSetting.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
 import { getAdminNotificationRecipients, logSystemEvent, publicHandlerLabel, resolveHandledByDetails, sendUserMail } from '../utils/notifications.js';
 
 const router = express.Router();
 const REPORT_STATUSES = ['new', 'in-review', 'resolved', 'rejected'];
+const AUTO_ARCHIVE_RESOLVED_AFTER_DAYS = 7;
 
 function normalizeAttachments(value) {
   if (!Array.isArray(value)) return [];
@@ -82,6 +84,25 @@ async function notifyReportUpdate({ report, title, textTitle, actor, comment = '
   }
 }
 
+async function autoArchiveResolvedReportsIfEnabled() {
+  const settings = await SystemSetting.findOne().select('autoArchiveReports').lean();
+  if (settings?.autoArchiveReports === false) return;
+
+  const cutoff = new Date(Date.now() - AUTO_ARCHIVE_RESOLVED_AFTER_DAYS * 24 * 60 * 60 * 1000);
+  await IssueReport.updateMany(
+    {
+      status: 'resolved',
+      updatedAt: { $lt: cutoff },
+    },
+    {
+      $set: {
+        status: 'rejected',
+        adminChecked: true,
+      },
+    },
+  );
+}
+
 router.post('/', optionalAuth, async (req, res) => {
   try {
     const referenceNo = makeReference('RPT');
@@ -118,6 +139,7 @@ router.post('/', optionalAuth, async (req, res) => {
 
 router.get('/', auth, requireRoles('admin', 'superadmin'), async (_req, res) => {
   try {
+    await autoArchiveResolvedReportsIfEnabled();
     const reports = await IssueReport.find()
       .select('-attachments.dataUrl')
       .sort({ createdAt: -1 })

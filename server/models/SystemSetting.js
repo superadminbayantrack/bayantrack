@@ -11,6 +11,11 @@ const SystemSettingSchema = new mongoose.Schema(
     sessionTimeoutMinutes: { type: Number, default: 60 },
     lockoutWindowMinutes: { type: Number, default: 15 },
     developerOptionsEnabled: { type: Boolean, default: false },
+    notificationRecipientMode: {
+      type: String,
+      enum: ['all', 'superadmin', 'admin'],
+      default: 'all',
+    },
   },
   { timestamps: true },
 );

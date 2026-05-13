@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
+import { createRequire } from "module";
 import { handleDemo } from "./routes/demo";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
@@ -17,7 +18,12 @@ import User from "./models/User.js";
 import Department from "./models/Department.js";
 import Announcement from "./models/Announcement.js";
 import Official from "./models/Official.js";
+import SystemSetting from "./models/SystemSetting.js";
+import { getEmbeddedAccountById } from "./config/embeddedAccounts.js";
 import { DEFAULT_ADMIN_PERMISSIONS, getBootstrapAccounts, type BootstrapAccount } from "./config/bootstrapAccounts";
+
+const require = createRequire(import.meta.url);
+const jwt = require("jsonwebtoken");
 
 let dbInitialized = false;
 let dbInitPromise: Promise<void> | null = null;
@@ -240,6 +246,56 @@ async function ensureDatabaseReady() {
   await dbInitPromise;
 }
 
+function getRequestToken(req: express.Request) {
+  const headerToken = req.header("x-auth-token");
+  const bearerToken = req.header("authorization")?.startsWith("Bearer ")
+    ? req.header("authorization").replace("Bearer ", "")
+    : null;
+  return headerToken || bearerToken || "";
+}
+
+async function isAdminRequest(req: express.Request) {
+  const token = getRequestToken(req);
+  if (!token) return false;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "secrettoken");
+    const userId = decoded?.user?.id;
+    const embeddedAccount = getEmbeddedAccountById(userId);
+    if (embeddedAccount) {
+      return ["admin", "superadmin"].includes(embeddedAccount.role);
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(userId || ""))) return false;
+    const user = await User.findById(userId).select("role status").lean();
+    return Boolean(user && user.status === "active" && ["admin", "superadmin"].includes(user.role));
+  } catch (_err) {
+    return false;
+  }
+}
+
+async function enforceMaintenanceMode(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (req.path === "/ping" || req.path.startsWith("/admin") || req.path === "/auth/login") {
+    return next();
+  }
+
+  const settings = await SystemSetting.findOne()
+    .select("maintenanceMode maintenanceMessage")
+    .lean();
+
+  if (!settings?.maintenanceMode) {
+    return next();
+  }
+
+  if (await isAdminRequest(req)) {
+    return next();
+  }
+
+  return res.status(503).json({
+    msg: settings.maintenanceMessage || "The resident portal is temporarily under maintenance. Please try again later.",
+  });
+}
+
 export function createServer() {
   const app = express();
 
@@ -331,6 +387,7 @@ export function createServer() {
       next(err);
     }
   });
+  app.use("/api", enforceMaintenanceMode);
 
   // Keep API paths consistent in both dev and production.
   app.use("/api/auth", authRoutes);

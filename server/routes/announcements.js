@@ -1,6 +1,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import Announcement from '../models/Announcement.js';
+import SystemSetting from '../models/SystemSetting.js';
 import { auth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { logSystemEvent } from '../utils/notifications.js';
 
@@ -47,6 +48,11 @@ router.get('/all', auth, requireRoles('admin', 'superadmin'), async (_req, res) 
 
 router.post('/', auth, requireRoles('admin', 'superadmin'), requireAdminPermission('announcements', 'add'), async (req, res) => {
   try {
+    const settings = await SystemSetting.findOne().select('requireAnnouncementReview').lean();
+    if (settings?.requireAnnouncementReview && req.user.role !== 'superadmin') {
+      return res.status(403).json({ msg: 'Announcement publishing is currently limited to superadmin review.' });
+    }
+
     const payload = {
       ...req.body,
       createdBy: mongoose.Types.ObjectId.isValid(String(req.user.id || '')) ? req.user.id : null,

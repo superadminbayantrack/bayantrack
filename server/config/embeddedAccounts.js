@@ -44,13 +44,29 @@ function cloneAccount(account) {
   };
 }
 
-export function findEmbeddedAccount(identifier, password) {
+function matchesIdentifier(account, identifier) {
   const normalizedIdentifier = String(identifier || '').trim().toLowerCase();
+  if (!normalizedIdentifier) return false;
+  return [account.username, account.email, account.contactNumber]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .includes(normalizedIdentifier);
+}
+
+export function findEmbeddedAccount(identifier, password) {
   const normalizedPassword = String(password || '');
-  const account = EMBEDDED_ACCOUNTS.find((item) =>
-    item.username.toLowerCase() === normalizedIdentifier && item.password === normalizedPassword
-  );
+  const account = EMBEDDED_ACCOUNTS.find((item) => matchesIdentifier(item, identifier) && item.password === normalizedPassword);
   return cloneAccount(account);
+}
+
+export function getEmbeddedAccountByIdentifier(identifier) {
+  const account = EMBEDDED_ACCOUNTS.find((item) => matchesIdentifier(item, identifier));
+  return cloneAccount(account);
+}
+
+export function isReservedEmbeddedIdentity(values = {}) {
+  return [values.username, values.email, values.contactNumber]
+    .filter(Boolean)
+    .some((value) => Boolean(getEmbeddedAccountByIdentifier(value)));
 }
 
 export function getEmbeddedAccountById(id) {

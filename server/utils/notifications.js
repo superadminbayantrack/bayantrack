@@ -1,5 +1,6 @@
 import ActivityLog from '../models/ActivityLog.js';
 import User from '../models/User.js';
+import SystemSetting from '../models/SystemSetting.js';
 import { getNotificationEmail, safeSendMail } from './mailer.js';
 import mongoose from 'mongoose';
 import { getEmbeddedAccountById } from '../config/embeddedAccounts.js';
@@ -129,11 +130,11 @@ export async function logSystemEvent({
   }
 
   if (notifySuperadmin) {
-    const recipient = getNotificationEmail();
-    if (recipient) {
+    const recipients = await getAdminNotificationRecipients();
+    if (recipients.length > 0) {
       try {
         await safeSendMail({
-          to: recipient,
+          to: recipients.join(','),
           subject: `BayanTrack System Update: ${title}`,
           html: buildSystemEventHtml({ title, type, referenceNo, metadata }),
           text: `${title}\nType: ${type}\nReference: ${referenceNo || 'N/A'}\nModule: ${metadata?.module || 'general'}`,
@@ -157,14 +158,32 @@ export async function sendUserMail(options) {
 }
 
 export async function getAdminNotificationRecipients() {
+  const settings = await SystemSetting.findOne()
+    .select('emailDigest notificationRecipientMode')
+    .lean();
+
+  if (settings?.emailDigest === false) {
+    return [];
+  }
+
+  const mode = ['all', 'superadmin', 'admin'].includes(settings?.notificationRecipientMode)
+    ? settings.notificationRecipientMode
+    : 'all';
+  const roles = mode === 'superadmin'
+    ? ['superadmin']
+    : mode === 'admin'
+      ? ['admin']
+      : ['admin', 'superadmin'];
+
   const users = await User.find({
-    role: { $in: ['admin', 'superadmin'] },
+    role: { $in: roles },
     status: 'active',
     email: { $exists: true, $ne: '' },
   }).select('email');
 
+  const fallbackEmail = mode === 'admin' ? '' : getNotificationEmail();
   const emails = Array.from(new Set([
-    getNotificationEmail(),
+    fallbackEmail,
     ...users.map((item) => String(item.email || '').trim()).filter(Boolean),
   ].filter(Boolean)));
 
