@@ -302,6 +302,13 @@ export function createServer() {
 
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+  // Health check that does not require MongoDB.
+  app.get("/api/ping", (_req, res) => {
+    const ping = process.env.PING_MESSAGE ?? "ping";
+    res.json({ message: ping });
+  });
+
   app.use("/api", async (_req, _res, next) => {
     try {
       await ensureDatabaseReady();
@@ -324,11 +331,6 @@ export function createServer() {
   app.use("/api/content", contentRoutes);
 
   // Example API routes
-  app.get("/api/ping", (_req, res) => {
-    const ping = process.env.PING_MESSAGE ?? "ping";
-    res.json({ message: ping });
-  });
-
   app.get("/api/demo", handleDemo);
 
   return app;
