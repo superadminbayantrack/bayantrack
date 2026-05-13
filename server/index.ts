@@ -22,7 +22,47 @@ import { DEFAULT_ADMIN_PERMISSIONS, getBootstrapAccounts, type BootstrapAccount 
 let dbInitialized = false;
 let dbInitPromise: Promise<void> | null = null;
 
+dotenv.config({ path: ".env.local" });
 dotenv.config();
+
+function getMongoUri() {
+  const uri = process.env.MONGODB_URI || process.env.MONGO_URI;
+
+  if (!uri) {
+    throw new Error("MONGODB_URI is not set. Set MONGODB_URI in Vercel or MONGO_URI locally.");
+  }
+
+  return uri;
+}
+
+function getMongoConnectionOptions(uri: string) {
+  const configuredDbName = process.env.MONGODB_DB_NAME || process.env.MONGO_DB_NAME;
+  if (configuredDbName) {
+    return { dbName: configuredDbName };
+  }
+
+  try {
+    const dbNameFromUri = new URL(uri).pathname.replace(/^\/+|\/+$/g, "");
+    if (!dbNameFromUri) {
+      return { dbName: "bayantrack" };
+    }
+  } catch (_err) {
+    // Let mongoose report malformed MongoDB connection strings.
+  }
+
+  return undefined;
+}
+
+async function ensureMongoConnected(uri: string) {
+  if (mongoose.connection.readyState === 1) return;
+
+  if (mongoose.connection.readyState === 2) {
+    await mongoose.connection.asPromise();
+    return;
+  }
+
+  await mongoose.connect(uri, getMongoConnectionOptions(uri));
+}
 
 async function findBootstrapAccountOwner(account: BootstrapAccount) {
   return User.findOne({
@@ -89,15 +129,9 @@ async function repairBootstrapAccount(account: BootstrapAccount) {
 }
 
 async function connectAndSeed() {
-  const uri = process.env.MONGO_URI;
+  const uri = getMongoUri();
 
-  if (!uri) {
-    throw new Error("MONGO_URI is not set");
-  }
-
-  if (mongoose.connection.readyState === 0) {
-    await mongoose.connect(uri);
-  }
+  await ensureMongoConnected(uri);
 
   if (dbInitialized) return;
 
@@ -183,7 +217,7 @@ async function connectAndSeed() {
 }
 
 async function ensureDatabaseReady() {
-  if (dbInitialized) return;
+  if (dbInitialized && mongoose.connection.readyState === 1) return;
   if (!dbInitPromise) {
     dbInitPromise = connectAndSeed().catch((err) => {
       dbInitPromise = null;

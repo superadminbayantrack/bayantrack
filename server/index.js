@@ -18,6 +18,7 @@ import subscriptionsRoutes from './routes/subscriptions.js';
 import contentRoutes from './routes/content.js';
 
 const app = express();
+dotenv.config({ path: '.env.local' });
 dotenv.config();
 
 // Middleware
@@ -35,13 +36,42 @@ app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/content', contentRoutes);
 
 // Database Connection
-const uri = process.env.MONGO_URI;
+const uri = process.env.MONGODB_URI || process.env.MONGO_URI;
 
 if (!uri) {
-  throw new Error("MONGO_URI is not set");
+  throw new Error("MONGODB_URI is not set. Set MONGODB_URI in Vercel or MONGO_URI locally.");
 }
 
-mongoose.connect(uri)
+function getMongoConnectionOptions(connectionString) {
+  const configuredDbName = process.env.MONGODB_DB_NAME || process.env.MONGO_DB_NAME;
+  if (configuredDbName) {
+    return { dbName: configuredDbName };
+  }
+
+  try {
+    const dbNameFromUri = new URL(connectionString).pathname.replace(/^\/+|\/+$/g, "");
+    if (!dbNameFromUri) {
+      return { dbName: "bayantrack" };
+    }
+  } catch (_err) {
+    // Let mongoose report malformed MongoDB connection strings.
+  }
+
+  return undefined;
+}
+
+async function ensureMongoConnected(connectionString) {
+  if (mongoose.connection.readyState === 1) return;
+
+  if (mongoose.connection.readyState === 2) {
+    await mongoose.connection.asPromise();
+    return;
+  }
+
+  await mongoose.connect(connectionString, getMongoConnectionOptions(connectionString));
+}
+
+ensureMongoConnected(uri)
   .then(async () => {
     console.log("MongoDB Connected Successfully");
     
