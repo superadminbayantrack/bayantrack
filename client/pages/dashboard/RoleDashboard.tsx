@@ -134,6 +134,12 @@ function Badge({ value }: { value: string }) {
   return <span className={`rounded-full px-2 py-1 text-xs font-semibold ${tone}`}>{value}</span>;
 }
 
+function childReviewProgress(status?: string) {
+  const value = String(status || "pending").toLowerCase();
+  if (value === "approved" || value === "rejected") return 100;
+  return 45;
+}
+
 function MiniBar({ label, value, max }: { label: string; value: number; max: number }) {
   const pct = max > 0 ? Math.max(6, Math.round((value / max) * 100)) : 6;
   return (
@@ -1125,7 +1131,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
         setAccountControlModal(null);
       } else {
         await runActionWithFeedback(
-          userReasonPrompt.nextStatus === "approved" ? "Child access approved" : "Child access rejected",
+          userReasonPrompt.nextStatus === "approved" ? "Child access approved" : userReasonPrompt.nextStatus === "pending" ? "Child access returned to pending" : "Child access rejected",
           () => api.patch(`/api/admin/users/${userReasonPrompt.userId}/children/${userReasonPrompt.childId}/status`, {
             status: userReasonPrompt.nextStatus,
             reason,
@@ -1146,6 +1152,43 @@ export default function RoleDashboard({ role }: DashboardProps) {
     setActionLoading(true);
     try { await pendingAction.run(); setPendingAction(null); } catch (err: any) { setFeedback({ type: "error", title: "Action failed", message: err?.response?.data?.msg || "Please try again." }); }
     finally { setActionLoading(false); }
+  }
+
+  async function deleteUserAccount(userId: string) {
+    await runActionWithFeedback("User deleted", async () => {
+      await api.delete(`/api/admin/users/${userId}`, { headers: authHeaders() });
+    });
+    setSelectedUser(null);
+    setUserEditModal(null);
+    setAccountControlModal(null);
+  }
+
+  async function saveManagedReport(report: ReportItem) {
+    await runActionWithFeedback("Report updated", async () => {
+      await api.put(`/api/reports/${report._id}`, report, { headers: authHeaders() });
+    });
+    setReportManageModal(null);
+  }
+
+  async function saveManagedServiceRequest(request: ServiceRequest) {
+    await runActionWithFeedback("Service request updated", async () => {
+      await api.put(`/api/services/requests/${request._id}`, request, { headers: authHeaders() });
+    });
+    setServiceManageModal(null);
+  }
+
+  async function saveManagedMessage(message: ContactMessage) {
+    await runActionWithFeedback("Message updated", async () => {
+      await api.put(`/api/contact/messages/${message._id}`, message, { headers: authHeaders() });
+    });
+    setMessageManageModal(null);
+  }
+
+  async function saveManagedSubscriber(subscription: Subscription) {
+    await runActionWithFeedback("Subscriber updated", async () => {
+      await api.put(`/api/subscriptions/${subscription._id}`, subscription, { headers: authHeaders() });
+    });
+    setSubscriptionManageModal(null);
   }
 
   function confirmLogout() { setIsLoggingOut(true); setTimeout(() => { clearAuthSession(); navigate("/"); }, 3000); }
@@ -1525,7 +1568,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                               </button>
                             )}
                             {canManage && !(user.role === "superadmin" && user.username === "superAdmin123") && (
-                              <button className={btnDanger} onClick={() => setPendingAction({ title: "Delete Permanently", message: `Delete ${user.username} and linked records?`, confirmLabel: "Delete", run: () => runActionWithFeedback("User deleted", () => api.delete(`/api/admin/users/${user._id}`, { headers: authHeaders() })) })} type="button">Delete</button>
+                              <button className={btnDanger} onClick={() => setPendingAction({ title: "Delete Permanently", message: `Delete ${user.username} and linked records?`, confirmLabel: "Delete", run: () => deleteUserAccount(user._id) })} type="button">Delete</button>
                             )}
                           </div>
                         </td>
@@ -2336,26 +2379,38 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Linked Children</p>
                     {selectedUser.children && selectedUser.children.length > 0 ? (
                       <div className="space-y-3">
-                        {selectedUser.children.map((child, index) => (
-                          <div key={index} className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
-                            <div className="min-w-0">
-                              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Linked Child</p>
-                              <p className="mt-1 text-base font-semibold text-slate-900 break-words">{child.fullName || "N/A"}</p>
-                              <p className="mt-1 text-xs text-slate-500">Open details to view email, birth date, relationship, notes, and actions.</p>
+                        {selectedUser.children.map((child, index) => {
+                          const progress = childReviewProgress(child.status);
+                          return (
+                            <div key={index} className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Linked Child</p>
+                                <p className="mt-1 text-base font-semibold text-slate-900 break-words">{child.fullName || "N/A"}</p>
+                                <p className="mt-1 text-xs text-slate-500">Open details to view email, birth date, relationship, notes, and actions.</p>
+                                <div className="mt-3 max-w-sm">
+                                  <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                                    <span>{progress === 100 ? "Database synced" : "Pending admin review"}</span>
+                                    <span>{progress}%</span>
+                                  </div>
+                                  <div className="h-2 rounded-full bg-slate-100">
+                                    <div className={`h-2 rounded-full transition-all ${progress === 100 ? "bg-emerald-600" : "bg-amber-500"}`} style={{ width: `${progress}%` }} />
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge value={child.status || "pending"} />
+                                <button
+                                  className={btnSecondary}
+                                  onClick={() => setChildDetailModal({ parent: selectedUser, child })}
+                                  type="button"
+                                >
+                                  <FileText size={14} className="mr-1.5" />
+                                  View Details
+                                </button>
+                              </div>
                             </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Badge value={child.status || "pending"} />
-                              <button
-                                className={btnSecondary}
-                                onClick={() => setChildDetailModal({ parent: selectedUser, child })}
-                                type="button"
-                              >
-                                <FileText size={14} className="mr-1.5" />
-                                View Details
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <p className="text-slate-500">No linked children.</p>
@@ -2535,7 +2590,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         title: "Delete Account",
                         message: `Delete ${username} and linked records permanently?`,
                         confirmLabel: "Delete",
-                        run: () => runActionWithFeedback("User deleted", () => api.delete(`/api/admin/users/${id}`, { headers: authHeaders() }).then(() => setSelectedUser(null))),
+                        run: () => deleteUserAccount(id),
                       });
                     }}
                     type="button"
@@ -2694,23 +2749,14 @@ export default function RoleDashboard({ role }: DashboardProps) {
               {reportManageModal.attachments?.[0]?.dataUrl ? <button className={btnSecondary} onClick={() => window.open(reportManageModal.attachments?.[0]?.dataUrl, "_blank", "noopener,noreferrer")} type="button">View Attachment</button> : null}
               <LabeledField label="Status">
                 <select className={inputBase} value={reportManageModal.status} onChange={(e) => setReportManageModal((p) => p ? { ...p, status: e.target.value } : p)}>
-                  {role === "admin" ? (
-                    <>
-                      <option value={reportManageModal.status}>{reportManageModal.status}</option>
-                      <option value="in-review">in-review</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="new">new</option>
-                      <option value="in-review">in-review</option>
-                      <option value="resolved">resolved</option>
-                      <option value="rejected">rejected</option>
-                    </>
-                  )}
+                  <option value="new">new</option>
+                  <option value="in-review">in-review</option>
+                  <option value="resolved">resolved</option>
+                  <option value="rejected">rejected</option>
                 </select>
               </LabeledField>
             </div>
-            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Update Report", message: "Save report changes?", confirmLabel: "Save", run: () => runActionWithFeedback("Report updated", () => api.put(`/api/reports/${reportManageModal._id}`, reportManageModal, { headers: authHeaders() }).then(() => api.patch(`/api/reports/${reportManageModal._id}/status`, { status: reportManageModal.status, adminChecked: true }, { headers: authHeaders() })).then(() => setReportManageModal(null))) })} type="button">Save Report</button>
+            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Update Report", message: "Save report changes?", confirmLabel: "Save", run: () => saveManagedReport(reportManageModal) })} type="button">Save Report</button>
           </div>
         </div>
       )}
@@ -2728,24 +2774,15 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Purpose"><textarea className={inputBase} rows={3} value={serviceManageModal.purpose || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, purpose: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Status">
                 <select className={inputBase} value={serviceManageModal.status} onChange={(e) => setServiceManageModal((p) => p ? { ...p, status: e.target.value } : p)}>
-                  {role === "admin" ? (
-                    <>
-                      <option value={serviceManageModal.status}>{serviceManageModal.status}</option>
-                      <option value="in-review">in-review</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="pending">pending</option>
-                      <option value="in-review">in-review</option>
-                      <option value="approved">approved</option>
-                      <option value="completed">completed</option>
-                      <option value="rejected">rejected</option>
-                    </>
-                  )}
+                  <option value="pending">pending</option>
+                  <option value="in-review">in-review</option>
+                  <option value="approved">approved</option>
+                  <option value="completed">completed</option>
+                  <option value="rejected">rejected</option>
                 </select>
               </LabeledField>
             </div>
-            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Update Request", message: "Save service request changes?", confirmLabel: "Save", run: () => runActionWithFeedback("Service request updated", () => api.put(`/api/services/requests/${serviceManageModal._id}`, serviceManageModal, { headers: authHeaders() }).then(() => setServiceManageModal(null))) })} type="button">Save Request</button>
+            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Update Request", message: "Save service request changes?", confirmLabel: "Save", run: () => saveManagedServiceRequest(serviceManageModal) })} type="button">Save Request</button>
           </div>
         </div>
       )}
@@ -2768,7 +2805,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </select>
               </LabeledField>
             </div>
-            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Update Message", message: "Save message changes?", confirmLabel: "Save", run: () => runActionWithFeedback("Message updated", () => api.put(`/api/contact/messages/${messageManageModal._id}`, messageManageModal, { headers: authHeaders() }).then(() => setMessageManageModal(null))) })} type="button">Save Message</button>
+            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Update Message", message: "Save message changes?", confirmLabel: "Save", run: () => saveManagedMessage(messageManageModal) })} type="button">Save Message</button>
           </div>
         </div>
       )}
@@ -2787,7 +2824,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </select>
               </LabeledField>
             </div>
-            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Update Subscriber", message: "Save subscriber changes?", confirmLabel: "Save", run: () => runActionWithFeedback("Subscriber updated", () => api.put(`/api/subscriptions/${subscriptionManageModal._id}`, subscriptionManageModal, { headers: authHeaders() }).then(() => setSubscriptionManageModal(null))) })} type="button">Save Subscriber</button>
+            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Update Subscriber", message: "Save subscriber changes?", confirmLabel: "Save", run: () => saveManagedSubscriber(subscriptionManageModal) })} type="button">Save Subscriber</button>
           </div>
         </div>
       )}
@@ -3220,6 +3257,15 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Status</p>
                 <div className="mt-1 w-fit"><Badge value={childDetailModal.child.status || "pending"} /></div>
+                <div className="mt-3">
+                  <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                    <span>{childReviewProgress(childDetailModal.child.status) === 100 ? "System synced" : "Waiting for review"}</span>
+                    <span>{childReviewProgress(childDetailModal.child.status)}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-100">
+                    <div className={`h-2 rounded-full transition-all ${childReviewProgress(childDetailModal.child.status) === 100 ? "bg-emerald-600" : "bg-amber-500"}`} style={{ width: `${childReviewProgress(childDetailModal.child.status)}%` }} />
+                  </div>
+                </div>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Review Note</p>
@@ -3282,14 +3328,14 @@ export default function RoleDashboard({ role }: DashboardProps) {
                             title: "Return Child Access to Pending Review",
                             userId: parent._id,
                             username: parent.username,
-                            nextStatus: "rejected",
+                            nextStatus: "pending",
                             childId: child._id,
                             childName: child.fullName || "Child",
                           });
                         }}
                         type="button"
                       >
-                        Remove Access
+                        Return to Pending
                       </button>
                       <button
                         className={btnDanger}
@@ -3388,7 +3434,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                       title: "Delete Account",
                       message: `Delete ${accountControlModal.username} and linked records permanently?`,
                       confirmLabel: "Delete",
-                      run: () => runActionWithFeedback("User deleted", () => api.delete(`/api/admin/users/${accountControlModal._id}`, { headers: authHeaders() })),
+                      run: () => deleteUserAccount(accountControlModal._id),
                     });
                   }}
                   type="button"

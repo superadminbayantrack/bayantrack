@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import ServiceRequest from '../models/ServiceRequest.js';
 import ServiceCatalog from '../models/ServiceCatalog.js';
 import EvacuationCenter from '../models/EvacuationCenter.js';
@@ -146,7 +147,39 @@ function serviceRequestEmailHtml({ title, bodyLines = [] }) {
         </div>
       </div>
     </div>
-  </div>`;
+</div>`;
+}
+
+async function notifyServiceRequestStatus({ item, residentUser, actorRole, note = '', title = 'A service request status was updated.' }) {
+  const residentRecipients = Array.from(new Set([
+    residentUser?.email,
+    ...((residentUser?.children || []).map((child) => String(child.email || '').trim()).filter(Boolean)),
+  ].filter(Boolean)));
+  const adminRecipients = await getAdminNotificationRecipients();
+  const statusLines = [
+    `<strong>Reference:</strong> ${item.referenceNo}`,
+    `<strong>Service:</strong> ${item.serviceType}`,
+    `<strong>Updated status:</strong> ${item.status}`,
+    `<strong>Updated by:</strong> ${actorRole || 'system'}`,
+    note ? `<strong>Note:</strong> ${note}` : '',
+  ].filter(Boolean);
+
+  if (residentRecipients.length > 0) {
+    await sendUserMail({
+      to: residentRecipients.join(','),
+      subject: `Service Request ${item.referenceNo} Updated to ${item.status}`,
+      html: serviceRequestEmailHtml({ title: 'Your service request status was updated.', bodyLines: statusLines }),
+      text: `Service request ${item.referenceNo} was updated to ${item.status}.${note ? ` Note: ${note}` : ''}`,
+    });
+  }
+  if (adminRecipients.length > 0) {
+    await sendUserMail({
+      to: adminRecipients.join(','),
+      subject: `Service Request ${item.referenceNo} Status Updated`,
+      html: serviceRequestEmailHtml({ title, bodyLines: statusLines }),
+      text: `Service request ${item.referenceNo} was updated to ${item.status} by ${actorRole || 'system'}.${note ? ` Note: ${note}` : ''}`,
+    });
+  }
 }
 
 router.get('/catalog', (_req, res) => {
@@ -229,19 +262,22 @@ router.delete('/catalog/:id', auth, requireRoles('superadmin'), async (req, res)
 
 router.post('/requests', auth, async (req, res) => {
   try {
-    const parentUser = await User.findById(req.user.id).select('firstName lastName email children');
-    if (!parentUser) {
+    const hasMongoActor = mongoose.Types.ObjectId.isValid(String(req.user.id || ''));
+    const parentUser = hasMongoActor
+      ? await User.findById(req.user.id).select('firstName lastName email children')
+      : null;
+    if (req.user.role === 'resident' && !parentUser) {
       return res.status(404).json({ msg: 'User not found' });
     }
     const referenceNo = makeReference('SVC');
-    const actingChild = req.user.actingChild
+    const actingChild = parentUser && req.user.actingChild
       ? (parentUser.children || []).find((child) => String(child._id) === String(req.user.actingChild.id))
       : null;
     const request = await ServiceRequest.create({
       ...req.body,
-      user: req.user.id,
+      user: parentUser?._id || null,
       referenceNo,
-      history: [{ status: 'pending', by: req.user.id, note: 'Request submitted' }],
+      history: [{ status: 'pending', by: hasMongoActor ? req.user.id : undefined, note: 'Request submitted' }],
     });
 
     await logSystemEvent({
@@ -254,7 +290,7 @@ router.post('/requests', auth, async (req, res) => {
 
     const adminRecipients = await getAdminNotificationRecipients();
     const residentRecipients = Array.from(new Set([
-      parentUser.email,
+      parentUser?.email,
       ...(actingChild?.email ? [actingChild.email] : []),
     ].filter(Boolean)));
 
@@ -262,7 +298,7 @@ router.post('/requests', auth, async (req, res) => {
       `<strong>Reference:</strong> ${referenceNo}`,
       `<strong>Service:</strong> ${request.serviceType}`,
       `<strong>Submitted by:</strong> ${actingChild ? `${actingChild.fullName} using parent account` : request.fullName}`,
-      `<strong>Parent account:</strong> ${parentUser.email}`,
+      parentUser?.email ? `<strong>Parent account:</strong> ${parentUser.email}` : `<strong>Created by:</strong> ${req.user.role}`,
       `<strong>Status:</strong> pending`,
     ];
 
@@ -271,7 +307,7 @@ router.post('/requests', auth, async (req, res) => {
         to: adminRecipients.join(','),
         subject: `New Service Request Submitted: ${request.serviceType}`,
         html: serviceRequestEmailHtml({ title: 'A new service request was submitted.', bodyLines: submissionLines }),
-        text: `New service request submitted.\nReference: ${referenceNo}\nService: ${request.serviceType}\nSubmitted by: ${actingChild ? `${actingChild.fullName} using parent account` : request.fullName}\nParent account: ${parentUser.email}\nStatus: pending`,
+        text: `New service request submitted.\nReference: ${referenceNo}\nService: ${request.serviceType}\nSubmitted by: ${actingChild ? `${actingChild.fullName} using parent account` : request.fullName}\n${parentUser?.email ? `Parent account: ${parentUser.email}` : `Created by: ${req.user.role}`}\nStatus: pending`,
       });
     }
     if (residentRecipients.length > 0) {
@@ -291,6 +327,9 @@ router.post('/requests', auth, async (req, res) => {
 
 router.get('/requests/me', auth, async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(String(req.user.id || ''))) {
+      return res.json([]);
+    }
     const items = await ServiceRequest.find({ user: req.user.id }).sort({ createdAt: -1 }).lean();
     return res.json(items);
   } catch (err) {
@@ -305,7 +344,7 @@ router.get('/requests/track/:referenceNo', auth, async (req, res) => {
       return res.status(404).json({ msg: 'Request not found' });
     }
 
-    if (req.user.role === 'resident' && item.user.toString() !== req.user.id) {
+    if (req.user.role === 'resident' && (!item.user || item.user.toString() !== req.user.id)) {
       return res.status(403).json({ msg: 'Forbidden' });
     }
 
@@ -328,8 +367,8 @@ router.patch('/requests/:id/status', auth, requireRoles('admin', 'superadmin'), 
   try {
     const { status, note } = req.body;
 
-    if (req.user.role === 'admin' && status && !['in-review'].includes(status)) {
-      return res.status(403).json({ msg: 'Admin can only set status to in-review' });
+    if (status && !['pending', 'in-review', 'approved', 'rejected', 'completed'].includes(status)) {
+      return res.status(400).json({ msg: 'Invalid status' });
     }
 
     const item = await ServiceRequest.findById(req.params.id);
@@ -339,8 +378,9 @@ router.patch('/requests/:id/status', auth, requireRoles('admin', 'superadmin'), 
     const residentUser = await User.findById(item.user).select('firstName lastName email children');
 
     if (status) {
+      const hasMongoActor = mongoose.Types.ObjectId.isValid(String(req.user.id || ''));
       item.status = status;
-      item.history.push({ status, by: req.user.id, note: note || '' });
+      item.history.push({ status, by: hasMongoActor ? req.user.id : undefined, note: note || '' });
     }
 
     await item.save();
@@ -353,37 +393,7 @@ router.patch('/requests/:id/status', auth, requireRoles('admin', 'superadmin'), 
       metadata: { byRole: req.user.role, action: item.status === 'rejected' ? 'archive' : 'update', module: 'service-requests', residentUser: item.user },
     });
 
-    if (residentUser) {
-      const residentRecipients = Array.from(new Set([
-        residentUser.email,
-        ...((residentUser.children || []).map((child) => String(child.email || '').trim()).filter(Boolean)),
-      ]));
-      const adminRecipients = await getAdminNotificationRecipients();
-      const statusLines = [
-        `<strong>Reference:</strong> ${item.referenceNo}`,
-        `<strong>Service:</strong> ${item.serviceType}`,
-        `<strong>Updated status:</strong> ${item.status}`,
-        `<strong>Updated by:</strong> ${req.user.role}`,
-        note ? `<strong>Note:</strong> ${note}` : '',
-      ].filter(Boolean);
-
-      if (residentRecipients.length > 0) {
-        await sendUserMail({
-          to: residentRecipients.join(','),
-          subject: `Service Request ${item.referenceNo} Updated to ${item.status}`,
-          html: serviceRequestEmailHtml({ title: 'Your service request status was updated.', bodyLines: statusLines }),
-          text: `Service request ${item.referenceNo} was updated to ${item.status}.${note ? ` Note: ${note}` : ''}`,
-        });
-      }
-      if (adminRecipients.length > 0) {
-        await sendUserMail({
-          to: adminRecipients.join(','),
-          subject: `Service Request ${item.referenceNo} Status Updated`,
-          html: serviceRequestEmailHtml({ title: 'A service request status was updated.', bodyLines: statusLines }),
-          text: `Service request ${item.referenceNo} was updated to ${item.status} by ${req.user.role}.${note ? ` Note: ${note}` : ''}`,
-        });
-      }
-    }
+    await notifyServiceRequestStatus({ item, residentUser, actorRole: req.user.role, note });
 
     return res.json(item);
   } catch (err) {
@@ -401,9 +411,16 @@ router.put('/requests/:id', auth, requireRoles('admin', 'superadmin'), requireAd
       return res.status(400).json({ msg: 'Invalid status' });
     }
 
-    const item = await ServiceRequest.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
-    if (!item) {
+    const existing = await ServiceRequest.findById(req.params.id);
+    if (!existing) {
       return res.status(404).json({ msg: 'Request not found' });
+    }
+    const previousStatus = existing.status;
+    const item = await ServiceRequest.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
+    if (update.status && update.status !== previousStatus) {
+      const hasMongoActor = mongoose.Types.ObjectId.isValid(String(req.user.id || ''));
+      item.history.push({ status: update.status, by: hasMongoActor ? req.user.id : undefined, note: req.body.note || 'Updated from dashboard' });
+      await item.save();
     }
 
     await logSystemEvent({
@@ -413,6 +430,10 @@ router.put('/requests/:id', auth, requireRoles('admin', 'superadmin'), requireAd
       referenceNo: item.referenceNo,
       metadata: { action: 'update', module: 'service-requests', residentUser: item.user },
     });
+    if (update.status && update.status !== previousStatus) {
+      const residentUser = await User.findById(item.user).select('firstName lastName email children');
+      await notifyServiceRequestStatus({ item, residentUser, actorRole: req.user.role, note: req.body.note || 'Updated from dashboard' });
+    }
     return res.json(item);
   } catch (_err) {
     return res.status(400).json({ msg: 'Failed to update service request' });

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { User, Info, Clock, X, Eye, EyeOff } from "lucide-react";
+import { User, Info, Clock, X, Eye, EyeOff, MoreHorizontal, Send, Trash2 } from "lucide-react";
 import { Chatbot } from "@/components/Chatbot";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
@@ -59,6 +59,8 @@ type ChildSessionForm = {
   email: string;
 };
 
+const RELATIONSHIP_OPTIONS = ["Child", "Son", "Daughter", "Stepchild", "Ward", "Dependent"];
+
 export default function ProfileSettings() {
   const navigate = useNavigate();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -107,6 +109,8 @@ export default function ProfileSettings() {
     sending: false,
     verifying: false,
   });
+  const [childActionModal, setChildActionModal] = useState<{ index: number } | null>(null);
+  const [childRequestProgress, setChildRequestProgress] = useState(0);
   const [childSessionOtpModal, setChildSessionOtpModal] = useState<{ isOpen: boolean; otp: string; sending: boolean; verifying: boolean }>({
     isOpen: false,
     otp: "",
@@ -184,6 +188,7 @@ export default function ProfileSettings() {
   };
 
   const removeChildRow = (index: number) => {
+    setChildActionModal(null);
     setChildren((prev) => prev.filter((_, childIndex) => childIndex !== index));
   };
 
@@ -194,12 +199,17 @@ export default function ProfileSettings() {
       return;
     }
 
+    setChildActionModal(null);
+    setChildRequestProgress(18);
     setChildOtpModal({ isOpen: true, index, otp: "", sending: true, verifying: false });
     try {
+      setChildRequestProgress(34);
       await api.post("/api/auth/child-access/request-otp", { child }, { headers: authHeaders() });
+      setChildRequestProgress(52);
       setFeedback({ isOpen: true, title: "OTP Sent", message: "A child access OTP was sent to your registered email.", type: "success" });
       setChildOtpModal((prev) => ({ ...prev, sending: false }));
     } catch (err: any) {
+      setChildRequestProgress(0);
       setChildOtpModal({ isOpen: false, index: null, otp: "", sending: false, verifying: false });
       setFeedback({ isOpen: true, title: "OTP Failed", message: err.response?.data?.msg || "Could not send child access OTP.", type: "error" });
     }
@@ -216,11 +226,15 @@ export default function ProfileSettings() {
 
     setChildOtpModal((prev) => ({ ...prev, verifying: true }));
     try {
+      setChildRequestProgress(72);
       const res = await api.post("/api/auth/child-access/verify", { child, otp: childOtpModal.otp }, { headers: authHeaders() });
       setChildren(Array.isArray(res.data?.children) ? res.data.children : children);
       setChildOtpModal({ isOpen: false, index: null, otp: "", sending: false, verifying: false });
+      setChildRequestProgress(100);
       setFeedback({ isOpen: true, title: "Child Request Submitted", message: "The child access request is now pending superadmin approval.", type: "success" });
+      window.setTimeout(() => setChildRequestProgress(0), 600);
     } catch (err: any) {
+      setChildRequestProgress(52);
       setChildOtpModal((prev) => ({ ...prev, verifying: false }));
       setFeedback({ isOpen: true, title: "Verification Failed", message: err.response?.data?.msg || "Could not verify child access OTP.", type: "error" });
     }
@@ -630,7 +644,9 @@ export default function ProfileSettings() {
                         </div>
                         <div className="space-y-1.5">
                           <label className="block text-xs font-bold text-gray-800">Relationship</label>
-                          <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" value={child.relationship} onChange={(e) => handleChildChange(index, "relationship", e.target.value)} />
+                          <select className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" value={child.relationship || "Child"} onChange={(e) => handleChildChange(index, "relationship", e.target.value)}>
+                            {RELATIONSHIP_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                          </select>
                         </div>
                         <div className="flex flex-col items-stretch justify-end gap-2">
                           {child.status ? (
@@ -638,11 +654,21 @@ export default function ProfileSettings() {
                               {child.status}
                             </div>
                           ) : null}
-                          <button type="button" onClick={() => handleSendChildOtp(index)} className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100">
-                            Send OTP
+                          <button type="button" onClick={() => setChildActionModal({ index })} className="inline-flex h-10 w-10 items-center justify-center self-end rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" aria-label={`Open actions for ${child.fullName || "child"}`}>
+                            <MoreHorizontal size={18} />
                           </button>
-                          <button type="button" onClick={() => removeChildRow(index)} className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100">Remove</button>
                         </div>
+                        {childOtpModal.index === index && childRequestProgress > 0 ? (
+                          <div className="md:col-span-5">
+                            <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                              <span>{childRequestProgress >= 100 ? "Request submitted to admin" : "Syncing child access request"}</span>
+                              <span>{childRequestProgress}%</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-slate-100">
+                              <div className="h-2 rounded-full bg-[#395886] transition-all" style={{ width: `${childRequestProgress}%` }} />
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                     {children.length === 0 && <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">No linked children yet.</div>}
@@ -816,12 +842,46 @@ export default function ProfileSettings() {
         </div>
       )}
 
+      {childActionModal && children[childActionModal.index] && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Child Actions</h3>
+                <p className="mt-1 text-xs text-slate-500">{children[childActionModal.index].fullName || "Linked child"}</p>
+              </div>
+              <button type="button" onClick={() => setChildActionModal(null)} className="rounded-md p-1 text-slate-500 hover:bg-slate-100">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => handleSendChildOtp(childActionModal.index)}
+                className="flex w-full items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+              >
+                <Send size={16} />
+                Send OTP
+              </button>
+              <button
+                type="button"
+                onClick={() => removeChildRow(childActionModal.index)}
+                className="flex w-full items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
+              >
+                <Trash2 size={16} />
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {childOtpModal.isOpen && childOtpModal.index !== null && children[childOtpModal.index] && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-lg rounded-xl bg-white p-6">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900">Verify Child Access Request</h3>
-              <button type="button" onClick={() => setChildOtpModal({ isOpen: false, index: null, otp: "", sending: false, verifying: false })}>
+              <button type="button" onClick={() => { setChildRequestProgress(0); setChildOtpModal({ isOpen: false, index: null, otp: "", sending: false, verifying: false }); }}>
                 <X size={18} />
               </button>
             </div>
@@ -833,6 +893,17 @@ export default function ProfileSettings() {
               <p><span className="font-semibold">Relationship:</span> {children[childOtpModal.index].relationship || "Child"}</p>
             </div>
             <p className="mt-3 text-sm text-slate-600">An OTP was sent to the parent email. Enter it below to submit this child access request for superadmin approval.</p>
+            {childRequestProgress > 0 ? (
+              <div className="mt-4">
+                <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                  <span>{childOtpModal.verifying ? "Verifying and saving to database" : "Waiting for OTP verification"}</span>
+                  <span>{childRequestProgress}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-slate-100">
+                  <div className="h-2 rounded-full bg-[#395886] transition-all" style={{ width: `${childRequestProgress}%` }} />
+                </div>
+              </div>
+            ) : null}
             <input
               value={childOtpModal.otp}
               onChange={(e) => setChildOtpModal((prev) => ({ ...prev, otp: e.target.value }))}

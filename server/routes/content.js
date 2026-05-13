@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import SiteContent from '../models/SiteContent.js';
 import { auth, requireRoles } from '../middleware/auth.js';
 
@@ -61,7 +62,7 @@ router.patch('/site', auth, requireRoles('superadmin'), async (req, res) => {
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     }
-    update.updatedBy = req.user.id;
+    update.updatedBy = mongoose.Types.ObjectId.isValid(String(req.user.id || '')) ? req.user.id : null;
     const updated = await SiteContent.findByIdAndUpdate(
       content._id,
       { $set: update },

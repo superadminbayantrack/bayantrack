@@ -7,7 +7,7 @@ import ActivityLog from '../models/ActivityLog.js';
 import SystemSetting from '../models/SystemSetting.js';
 import ServiceRequest from '../models/ServiceRequest.js';
 import { auth } from '../middleware/auth.js';
-import { logSystemEvent, sendUserMail } from '../utils/notifications.js';
+import { getAdminNotificationRecipients, logSystemEvent, sendUserMail } from '../utils/notifications.js';
 import { findEmbeddedAccount, getEmbeddedAccountById } from '../config/embeddedAccounts.js';
 
 const router = express.Router();
@@ -300,6 +300,26 @@ function childProfileUpdateOtpText({ otp, child, parentName }) {
     `OTP Code: ${otp}`,
     `This code expires in 5 minutes.`,
   ].join('\n');
+}
+
+function childAccessSubmittedHtml({ parentName, child }) {
+  return `
+  <div style="font-family:Arial,sans-serif;background:#f8fafc;padding:24px;">
+    <div style="max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
+      <div style="background:#1e3a8a;color:#ffffff;padding:18px 20px;">
+        <h2 style="margin:0;font-size:20px;">BayanTrack Child Access Request</h2>
+      </div>
+      <div style="padding:20px;color:#0f172a;">
+        <p style="margin:0 0 12px;font-weight:700;">A linked child request is pending review.</p>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;">
+          <p style="margin:0 0 8px;"><strong>Parent:</strong> ${parentName || 'Resident'}</p>
+          <p style="margin:0 0 8px;"><strong>Child:</strong> ${child.fullName}</p>
+          <p style="margin:0 0 8px;"><strong>Child Email:</strong> ${child.email}</p>
+          <p style="margin:0;"><strong>Status:</strong> pending</p>
+        </div>
+      </div>
+    </div>
+  </div>`;
 }
 
 // @route   POST api/auth/send-otp
@@ -1063,6 +1083,17 @@ router.post('/child-access/verify', auth, async (req, res) => {
       type: 'child-access',
       metadata: { module: 'child-access', action: 'submit', childEmail: child.email, status: 'pending' },
     });
+
+    const adminRecipients = await getAdminNotificationRecipients();
+    if (adminRecipients.length > 0) {
+      const parentName = [user.firstName, user.lastName].filter(Boolean).join(' ');
+      await sendUserMail({
+        to: adminRecipients.join(','),
+        subject: `New Child Access Request: ${child.fullName}`,
+        html: childAccessSubmittedHtml({ parentName, child }),
+        text: `New child access request pending review.\nParent: ${parentName || 'Resident'}\nChild: ${child.fullName}\nChild Email: ${child.email}\nStatus: pending`,
+      });
+    }
 
     return res.json({ msg: 'Child access request submitted and is now pending superadmin approval.', children: user.children });
   } catch (err) {

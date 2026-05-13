@@ -1,6 +1,8 @@
 import ActivityLog from '../models/ActivityLog.js';
 import User from '../models/User.js';
 import { getNotificationEmail, safeSendMail } from './mailer.js';
+import mongoose from 'mongoose';
+import { getEmbeddedAccountById } from '../config/embeddedAccounts.js';
 
 function buildSystemEventHtml({ title, type, referenceNo, metadata }) {
   return `
@@ -31,14 +33,25 @@ export async function logSystemEvent({
   notifySuperadmin = true,
 }) {
   let created = null;
-  if (user) {
+  try {
+    const actorId = user ? String(user) : '';
+    const embeddedAccount = actorId ? getEmbeddedAccountById(actorId) : null;
+    const hasMongoActor = actorId && mongoose.Types.ObjectId.isValid(actorId);
     created = await ActivityLog.create({
-      user,
+      ...(hasMongoActor ? { user: actorId } : {}),
+      actorName: embeddedAccount?.username || metadata.actorName || (hasMongoActor ? '' : actorId || 'system'),
+      actorRole: embeddedAccount?.role || metadata.actorRole || '',
       type,
       title,
       referenceNo,
-      metadata,
+      metadata: {
+        ...metadata,
+        ...(actorId && !hasMongoActor ? { actorId } : {}),
+        ...(embeddedAccount ? { actorName: embeddedAccount.username, actorRole: embeddedAccount.role } : {}),
+      },
     });
+  } catch (err) {
+    console.error('Failed to write activity log:', err);
   }
 
   if (notifySuperadmin) {
@@ -79,7 +92,7 @@ export async function getAdminNotificationRecipients() {
   const emails = Array.from(new Set([
     getNotificationEmail(),
     ...users.map((item) => String(item.email || '').trim()).filter(Boolean),
-  ]));
+  ].filter(Boolean)));
 
   return emails;
 }

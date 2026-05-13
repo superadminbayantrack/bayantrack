@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Announcement from '../models/Announcement.js';
 import { auth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { logSystemEvent } from '../utils/notifications.js';
@@ -48,7 +49,7 @@ router.post('/', auth, requireRoles('admin', 'superadmin'), requireAdminPermissi
   try {
     const payload = {
       ...req.body,
-      createdBy: req.user.id,
+      createdBy: mongoose.Types.ObjectId.isValid(String(req.user.id || '')) ? req.user.id : null,
     };
     const item = await Announcement.create(payload);
     await logSystemEvent({

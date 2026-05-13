@@ -1,10 +1,13 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import IssueReport from '../models/IssueReport.js';
+import User from '../models/User.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
-import { logSystemEvent } from '../utils/notifications.js';
+import { getAdminNotificationRecipients, logSystemEvent, sendUserMail } from '../utils/notifications.js';
 
 const router = express.Router();
+const REPORT_STATUSES = ['new', 'in-review', 'resolved', 'rejected'];
 
 function normalizeAttachments(value) {
   if (!Array.isArray(value)) return [];
@@ -19,6 +22,55 @@ function normalizeAttachments(value) {
     .filter((item) => item.dataUrl.startsWith('data:image/'));
 }
 
+function reportEmailHtml({ title, lines = [] }) {
+  return `
+  <div style="font-family:Arial,sans-serif;background:#f8fafc;padding:24px;">
+    <div style="max-width:620px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
+      <div style="background:#7f1d1d;color:#ffffff;padding:18px 20px;">
+        <h2 style="margin:0;font-size:20px;">BayanTrack Report Update</h2>
+      </div>
+      <div style="padding:20px;color:#0f172a;">
+        <p style="margin:0 0 12px;font-weight:700;">${title}</p>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;">
+          ${lines.map((line) => `<p style="margin:0 0 8px;">${line}</p>`).join('')}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function notifyReportUpdate({ report, title, textTitle }) {
+  const lines = [
+    `<strong>Reference:</strong> ${report.referenceNo}`,
+    `<strong>Category:</strong> ${report.category}`,
+    `<strong>Status:</strong> ${report.status}`,
+    `<strong>Reporter:</strong> ${report.fullName}`,
+  ];
+  const text = `${textTitle}\nReference: ${report.referenceNo}\nCategory: ${report.category}\nStatus: ${report.status}\nReporter: ${report.fullName}`;
+  const recipients = await getAdminNotificationRecipients();
+
+  if (recipients.length > 0) {
+    await sendUserMail({
+      to: recipients.join(','),
+      subject: `BayanTrack Report ${report.referenceNo}: ${report.status}`,
+      html: reportEmailHtml({ title, lines }),
+      text,
+    });
+  }
+
+  if (report.user) {
+    const owner = await User.findById(report.user).select('email');
+    if (owner?.email) {
+      await sendUserMail({
+        to: owner.email,
+        subject: `Your BayanTrack Report ${report.referenceNo} Was Updated`,
+        html: reportEmailHtml({ title: 'Your issue report was updated.', lines }),
+        text,
+      });
+    }
+  }
+}
+
 router.post('/', optionalAuth, async (req, res) => {
   try {
     const referenceNo = makeReference('RPT');
@@ -26,7 +78,7 @@ router.post('/', optionalAuth, async (req, res) => {
       ...req.body,
       attachments: normalizeAttachments(req.body.attachments),
       referenceNo,
-      user: req.user?.id || null,
+      user: mongoose.Types.ObjectId.isValid(String(req.user?.id || '')) ? req.user.id : null,
     };
 
     const report = await IssueReport.create(payload);
@@ -40,6 +92,12 @@ router.post('/', optionalAuth, async (req, res) => {
         metadata: { module: 'reports', action: 'create' },
       });
     }
+
+    await notifyReportUpdate({
+      report,
+      title: 'A new issue report was submitted.',
+      textTitle: 'New issue report submitted.',
+    });
 
     return res.status(201).json(report);
   } catch (err) {
@@ -62,12 +120,20 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
     ['fullName', 'contactNumber', 'address', 'category', 'description'].forEach((key) => {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     });
+    if (req.body.status !== undefined) {
+      if (!REPORT_STATUSES.includes(req.body.status)) {
+        return res.status(400).json({ msg: 'Invalid status' });
+      }
+      update.status = req.body.status;
+      update.adminChecked = req.body.status !== 'new';
+    }
     if (req.body.attachments !== undefined) update.attachments = normalizeAttachments(req.body.attachments);
 
-    const report = await IssueReport.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
-    if (!report) {
+    const existing = await IssueReport.findById(req.params.id);
+    if (!existing) {
       return res.status(404).json({ msg: 'Report not found' });
     }
+    const report = await IssueReport.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
 
     await logSystemEvent({
       user: req.user.id,
@@ -76,6 +142,13 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
       referenceNo: report.referenceNo,
       metadata: { action: 'update', module: 'reports' },
     });
+    if (update.status && existing.status !== update.status) {
+      await notifyReportUpdate({
+        report,
+        title: `Report status was updated to ${report.status}.`,
+        textTitle: `Report ${report.referenceNo} was updated to ${report.status}.`,
+      });
+    }
     return res.json(report);
   } catch (_err) {
     return res.status(400).json({ msg: 'Failed to update report' });
@@ -85,19 +158,19 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
 router.patch('/:id/status', auth, requireRoles('admin', 'superadmin'), requireAdminPermission('reports', 'edit'), async (req, res) => {
   try {
     const { status, adminChecked } = req.body;
-
-    if (req.user.role === 'admin' && status && status !== 'in-review') {
-      return res.status(403).json({ msg: 'Admin can only move reports to in-review' });
+    if (status && !REPORT_STATUSES.includes(status)) {
+      return res.status(400).json({ msg: 'Invalid status' });
     }
 
     const update = {};
     if (status) update.status = status;
     if (typeof adminChecked === 'boolean') update.adminChecked = adminChecked;
 
-    const report = await IssueReport.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
-    if (!report) {
+    const existing = await IssueReport.findById(req.params.id);
+    if (!existing) {
       return res.status(404).json({ msg: 'Report not found' });
     }
+    const report = await IssueReport.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
 
     await logSystemEvent({
       user: req.user.id,
@@ -106,6 +179,13 @@ router.patch('/:id/status', auth, requireRoles('admin', 'superadmin'), requireAd
       referenceNo: report.referenceNo,
       metadata: { action: report.status === 'rejected' ? 'archive' : 'update', module: 'reports' },
     });
+    if (status && existing.status !== report.status) {
+      await notifyReportUpdate({
+        report,
+        title: `Report status was updated to ${report.status}.`,
+        textTitle: `Report ${report.referenceNo} was updated to ${report.status}.`,
+      });
+    }
     return res.json(report);
   } catch (err) {
     return res.status(400).json({ msg: 'Failed to update report' });

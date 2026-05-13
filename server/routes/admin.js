@@ -1,5 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
+import mongoose from 'mongoose';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -52,11 +53,16 @@ function serializeActivityLog(a) {
     title: a.title,
     referenceNo: a.referenceNo,
     createdAt: a.createdAt,
-    userId: a.user?._id,
-    userName: a.user?.username || 'unknown',
-    userRole: a.user?.role || 'unknown',
+    userId: a.user?._id || a.metadata?.actorId || null,
+    userName: a.user?.username || a.actorName || a.metadata?.actorName || 'system',
+    userRole: a.user?.role || a.actorRole || a.metadata?.actorRole || 'system',
     metadata: a.metadata || {},
   };
+}
+
+function activityActorQuery(userId) {
+  const id = String(userId || '');
+  return mongoose.Types.ObjectId.isValid(id) ? { user: id } : { 'metadata.actorId': id };
 }
 
 async function persistDailyActivitySnapshot(dateKey, rows) {
@@ -203,7 +209,7 @@ function accountStatusUpdateHtml({ firstName, fullName, status, reason }) {
 }
 
 function childStatusUpdateHtml({ parentName, childName, status, reason }) {
-  const statusLabel = status === 'approved' ? 'approved' : 'rejected';
+  const statusLabel = status === 'approved' ? 'approved' : status === 'pending' ? 'returned to pending review' : 'rejected';
   const reasonBlock = reason
     ? `<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:12px 14px;margin:14px 0;">
           <p style="margin:0;font-size:12px;color:#9a3412;">Reason</p>
@@ -213,7 +219,7 @@ function childStatusUpdateHtml({ parentName, childName, status, reason }) {
   return `
   <div style="font-family:Arial,sans-serif;background:#f6f8fc;padding:24px;">
     <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;">
-      <div style="background:${status === 'approved' ? '#166534' : '#991b1b'};color:#fff;padding:18px 20px;">
+      <div style="background:${status === 'approved' ? '#166534' : status === 'pending' ? '#92400e' : '#991b1b'};color:#fff;padding:18px 20px;">
         <h2 style="margin:0;font-size:20px;">BayanTrack - Mambog II</h2>
         <p style="margin:6px 0 0;font-size:12px;opacity:0.9;">Child Access Request Update</p>
       </div>
@@ -436,7 +442,7 @@ router.patch('/users/:id/status', auth, requireRoles('admin', 'superadmin'), asy
 router.patch('/users/:id/children/:childId/status', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
   try {
     const { status, reason } = req.body;
-    if (!['approved', 'rejected'].includes(String(status || '').trim())) {
+    if (!['pending', 'approved', 'rejected'].includes(String(status || '').trim())) {
       return res.status(400).json({ msg: 'Invalid child request status.' });
     }
 
@@ -457,7 +463,7 @@ router.patch('/users/:id/children/:childId/status', auth, requireRoles('admin', 
     await logSystemEvent({
       user: req.user.id,
       type: 'child-access',
-      title: `${status === 'approved' ? 'Approved' : 'Rejected'} child access for ${child.fullName}`,
+      title: `${status === 'approved' ? 'Approved' : status === 'pending' ? 'Returned to pending' : 'Rejected'} child access for ${child.fullName}`,
       referenceNo: child._id.toString(),
       metadata: { module: 'users', action: status, parentUserId: user._id.toString() },
     });
@@ -471,7 +477,7 @@ router.patch('/users/:id/children/:childId/status', auth, requireRoles('admin', 
       try {
         await sendUserMail({
           to: recipients.join(','),
-          subject: `BayanTrack Child Access ${status === 'approved' ? 'Approved' : 'Rejected'}`,
+          subject: `BayanTrack Child Access ${status === 'approved' ? 'Approved' : status === 'pending' ? 'Pending Review' : 'Rejected'}`,
           html,
           text,
         });
@@ -563,6 +569,24 @@ router.delete('/users/:id', auth, requireRoles('superadmin'), async (req, res) =
       return res.status(400).json({ msg: 'Protected superadmin account cannot be deleted.' });
     }
 
+    if (user.email) {
+      try {
+        await sendUserMail({
+          to: user.email,
+          subject: 'Your BayanTrack Account Was Deleted',
+          html: accountStatusUpdateHtml({
+            firstName: user.firstName,
+            fullName: [user.firstName, user.middleName, user.lastName].filter(Boolean).join(' '),
+            status: 'suspended',
+            reason: 'Your account and linked records were permanently deleted by the superadmin.',
+          }),
+          text: `Hi ${user.firstName || 'Resident'}, your BayanTrack account and linked records were permanently deleted by the superadmin.`,
+        });
+      } catch (mailErr) {
+        console.error('Failed to send account deletion email:', mailErr);
+      }
+    }
+
     await Promise.all([
       ServiceRequest.deleteMany({ user: user._id }),
       IssueReport.deleteMany({ user: user._id }),
@@ -591,7 +615,7 @@ router.get('/activity/me', auth, async (req, res) => {
   try {
     const { dateKey, start, end } = resolveDailyActivityRange(req.query.date);
     const activities = await ActivityLog.find({
-      user: req.user.id,
+      ...activityActorQuery(req.user.id),
       createdAt: { $gte: start, $lt: end },
     })
       .sort({ createdAt: -1 })
@@ -599,7 +623,7 @@ router.get('/activity/me', auth, async (req, res) => {
       .populate('user', 'username role')
       .lean();
 
-    const rows = activities.filter((a) => a.user).map(serializeActivityLog);
+    const rows = activities.map(serializeActivityLog);
     return res.json({ date: dateKey, items: rows });
   } catch (err) {
     return res.status(500).json({ msg: 'Failed to fetch activity logs' });
@@ -615,7 +639,7 @@ router.get('/activity', auth, requireRoles('admin', 'superadmin'), async (req, r
       .populate('user', 'username role')
       .lean();
 
-    const rows = activities.filter((a) => a.user).map(serializeActivityLog);
+    const rows = activities.map(serializeActivityLog);
     await persistDailyActivitySnapshot(dateKey, rows);
 
     return res.json({ date: dateKey, items: rows });
@@ -633,7 +657,7 @@ router.get('/notifications', auth, requireRoles('admin', 'superadmin'), async (r
       .populate('user', 'username role')
       .lean();
 
-    const items = activities.filter((a) => a.user).map(serializeActivityLog);
+    const items = activities.map(serializeActivityLog);
     await persistDailyActivitySnapshot(dateKey, items);
 
     return res.json({ date: dateKey, count: items.length, items });
