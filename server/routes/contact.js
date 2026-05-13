@@ -4,7 +4,7 @@ import Department from '../models/Department.js';
 import ContactMessage from '../models/ContactMessage.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
-import { getAdminNotificationRecipients, logSystemEvent, resolveActorDetails, sendUserMail } from '../utils/notifications.js';
+import { getAdminNotificationRecipients, logSystemEvent, publicHandlerLabel, resolveHandledByDetails, sendUserMail } from '../utils/notifications.js';
 
 const router = express.Router();
 const MESSAGE_STATUSES = ['new', 'read', 'closed'];
@@ -31,7 +31,7 @@ function messageEmailHtml({ title, lines = [] }) {
 }
 
 async function notifyMessageUpdate({ message, title, textTitle, actor, comment = '' }) {
-  const handler = actor?.name ? `${actor.name}${actor.role ? ` (${actor.role})` : ''}` : '';
+  const handler = actor ? publicHandlerLabel(actor) : '';
   const lines = [
     `<strong>Reference:</strong> ${message.referenceNo}`,
     `<strong>Sender:</strong> ${message.name}`,
@@ -178,7 +178,7 @@ router.patch('/messages/:id/status', auth, requireRoles('admin', 'superadmin'), 
       return res.status(400).json({ msg: 'Invalid status' });
     }
 
-    const actor = await resolveActorDetails(req.user);
+    const actor = await resolveHandledByDetails(req.user, req.body);
     const updated = await ContactMessage.findByIdAndUpdate(req.params.id, {
       status,
       ...(adminComment !== undefined ? { adminComment: String(adminComment || '').trim() } : {}),
@@ -225,7 +225,8 @@ router.put('/messages/:id', auth, requireRoles('admin', 'superadmin'), requireAd
     if (!existing) {
       return res.status(404).json({ msg: 'Message not found' });
     }
-    const actor = await resolveActorDetails(req.user);
+    const previousHandler = `${existing.handledByName || ''}|${existing.handledByRole || ''}|${existing.handledByUser || ''}`;
+    const actor = await resolveHandledByDetails(req.user, req.body);
     update.handledByName = actor.name;
     update.handledByRole = actor.role;
     update.handledAt = new Date();
@@ -239,7 +240,8 @@ router.put('/messages/:id', auth, requireRoles('admin', 'superadmin'), requireAd
       referenceNo: updated.referenceNo,
       metadata: { action: 'update', module: 'messages' },
     });
-    if ((update.status && update.status !== existing.status) || (update.adminComment !== undefined && update.adminComment !== existing.adminComment)) {
+    const handlerChanged = previousHandler !== `${updated.handledByName || ''}|${updated.handledByRole || ''}|${updated.handledByUser || ''}`;
+    if ((update.status && update.status !== existing.status) || (update.adminComment !== undefined && update.adminComment !== existing.adminComment) || handlerChanged) {
       await notifyMessageUpdate({
         message: updated,
         title: `Message status was updated to ${updated.status}.`,

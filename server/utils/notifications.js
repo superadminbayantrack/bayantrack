@@ -55,6 +55,49 @@ export async function resolveActorDetails(userPayload = {}) {
   };
 }
 
+export async function resolveHandledByDetails(userPayload = {}, body = {}) {
+  const hasHandlerPayload =
+    Object.prototype.hasOwnProperty.call(body || {}, 'handledByName') ||
+    Object.prototype.hasOwnProperty.call(body || {}, 'handledByRole') ||
+    Object.prototype.hasOwnProperty.call(body || {}, 'handledByUser');
+  const selectedName = String(body?.handledByName || '').trim();
+  const selectedRole = String(body?.handledByRole || '').trim();
+  const selectedId = String(body?.handledByUser || '').trim();
+
+  if (selectedName || selectedRole) {
+    return {
+      id: selectedId,
+      name: selectedName || 'Assigned staff',
+      role: selectedRole || 'staff',
+    };
+  }
+
+  if (hasHandlerPayload) {
+    return { id: '', name: '', role: '' };
+  }
+
+  return resolveActorDetails(userPayload);
+}
+
+export function publicHandlerLabel(handler = {}) {
+  if (!handler?.name && !handler?.role) return '';
+  const role = String(handler?.role || '').toLowerCase();
+  if (role.includes('admin') || role.includes('superadmin')) return 'Admin';
+  if (
+    role.includes('official') ||
+    role.includes('barangay') ||
+    role.includes('kagawad') ||
+    role.includes('captain') ||
+    role.includes('tanod') ||
+    role.includes('secretary') ||
+    role.includes('treasurer') ||
+    role.includes('staff')
+  ) {
+    return 'Barangay Official/Staff';
+  }
+  return 'Barangay Staff';
+}
+
 export async function logSystemEvent({
   user,
   type,

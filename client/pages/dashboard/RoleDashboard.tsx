@@ -1,5 +1,5 @@
 ﻿
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, FileText, LayoutDashboard, LogOut, Mail, Pencil, RotateCcw, Search, Settings, Shield, Trash2, UserCog, UserX, Users, X } from "lucide-react";
 import { clearAuthSession, type UserRole } from "@/lib/auth";
@@ -22,7 +22,8 @@ type AdminPermissions = {
 type UserItem = { _id: string; username: string; firstName?: string; middleName?: string; lastName?: string; email: string; contactNumber?: string; address?: string; addressDetails?: { blk?: string; lot?: string; street?: string; subdivision?: string; barangay?: string; city?: string; province?: string; zipCode?: string; }; preferredContactMethod?: string; gender?: string; civilStatus?: string; marriageContractImage?: string; children?: Array<{ _id?: string; fullName?: string; email?: string; birthDate?: string; relationship?: string; status?: "pending" | "approved" | "rejected"; reviewReason?: string }>; role: string; status: "active" | "pending" | "suspended"; statusReason?: string; validIdType?: string; validIdStatus?: string; validIdImage?: string; avatarImage?: string; createdAt?: string; adminPermissions?: Partial<AdminPermissions>; };
 type Official = { _id: string; name: string; role: string; level: "city" | "barangay"; rankOrder: number; committee?: string; description?: string; image?: string; active?: boolean; };
 type AnnouncementItem = { _id: string; title: string; content?: string; category: string; module: string; source?: string; image?: string; archived?: boolean; createdAt?: string; };
-type HandlerInfo = { adminComment?: string; handledByName?: string; handledByRole?: string; handledAt?: string; updatedAt?: string; };
+type HandlerInfo = { adminComment?: string; handledByUser?: string | null; handledByName?: string; handledByRole?: string; handledAt?: string; updatedAt?: string; };
+type HandlerOption = { value: string; label: string; category: "Admins" | "Barangay Officials / Staff"; name: string; role: string; userId: string | null };
 type ReportItem = HandlerInfo & { _id: string; fullName?: string; contactNumber?: string; address?: string; category: string; description: string; status: string; referenceNo: string; attachments?: Array<{ name?: string; type?: string; size?: number; dataUrl?: string }>; createdAt?: string; };
 type ServiceRequest = HandlerInfo & { _id: string; referenceNo: string; serviceType: string; fullName: string; contactNumber?: string; address?: string; purpose?: string; status: string; createdAt?: string; };
 type ContactMessage = HandlerInfo & { _id: string; referenceNo: string; name: string; contact?: string; department: string; message?: string; status: string; createdAt?: string; };
@@ -426,6 +427,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [serviceManageModal, setServiceManageModal] = useState<ServiceRequest | null>(null);
   const [messageManageModal, setMessageManageModal] = useState<ContactMessage | null>(null);
   const [subscriptionManageModal, setSubscriptionManageModal] = useState<Subscription | null>(null);
+  const [showClosedMessagesModal, setShowClosedMessagesModal] = useState(false);
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [userEditModal, setUserEditModal] = useState<(Partial<UserItem> & { password?: string }) | null>(null);
   const [addReportOpen, setAddReportOpen] = useState(false);
@@ -1303,6 +1305,80 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const sectionCard = "rounded-xl border border-slate-200 bg-slate-50/70 p-3";
   const moduleGrid = "grid gap-3 sm:grid-cols-2 xl:grid-cols-3";
   const moduleCard = "rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm transition hover:border-slate-300 hover:shadow-md";
+
+  const handlerOptions = useMemo<HandlerOption[]>(() => {
+    const userFullName = (user: UserItem) =>
+      [user.firstName, user.middleName, user.lastName].filter(Boolean).join(" ").trim()
+      || user.username
+      || user.email;
+
+    const adminOptions = users
+      .filter((user) => ["admin", "superadmin"].includes(String(user.role || "").toLowerCase()) && user.status !== "suspended")
+      .map((user) => {
+        const name = userFullName(user);
+        const roleLabel = user.role === "superadmin" ? "Superadmin" : "Admin";
+        return {
+          value: `user:${user._id}`,
+          label: `${name} (${roleLabel})`,
+          category: "Admins" as const,
+          name,
+          role: user.role || "admin",
+          userId: user._id,
+        };
+      });
+
+    const officialOptions = officials
+      .filter((official) => official.active !== false)
+      .map((official) => ({
+        value: `official:${official._id}`,
+        label: `${official.name}${official.role ? ` (${official.role})` : ""}`,
+        category: "Barangay Officials / Staff" as const,
+        name: official.name,
+        role: official.role || "Barangay Official",
+        userId: null,
+      }));
+
+    return [...adminOptions, ...officialOptions];
+  }, [users, officials]);
+
+  const adminHandlerOptions = handlerOptions.filter((option) => option.category === "Admins");
+  const officialHandlerOptions = handlerOptions.filter((option) => option.category === "Barangay Officials / Staff");
+
+  function selectedHandlerValue(item?: HandlerInfo | null) {
+    if (!item?.handledByName && !item?.handledByRole && !item?.handledByUser) return "";
+    const handledByUser = item.handledByUser ? String(item.handledByUser) : "";
+    const selectedByUser = handledByUser ? handlerOptions.find((option) => option.userId === handledByUser) : null;
+    if (selectedByUser) return selectedByUser.value;
+    return handlerOptions.find((option) => option.name === item.handledByName && option.role === item.handledByRole)?.value || "";
+  }
+
+  function applySelectedHandler<T extends HandlerInfo>(value: string, setter: Dispatch<SetStateAction<T | null>>) {
+    const selected = handlerOptions.find((option) => option.value === value);
+    setter((prev) => prev ? {
+      ...prev,
+      handledByName: selected?.name || "",
+      handledByRole: selected?.role || "",
+      handledByUser: selected?.userId || null,
+    } : prev);
+  }
+
+  function renderHandlerSelect<T extends HandlerInfo>(item: T | null, setter: Dispatch<SetStateAction<T | null>>) {
+    return (
+      <LabeledField label="Handled by">
+        <select className={inputBase} value={selectedHandlerValue(item)} onChange={(e) => applySelectedHandler(e.target.value, setter)}>
+          <option value="">Not assigned</option>
+          <optgroup label="Admins">
+            {adminHandlerOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </optgroup>
+          <optgroup label="Barangay Officials / Staff">
+            {officialHandlerOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </optgroup>
+        </select>
+        <span className="mt-1 block text-xs text-slate-500">Current: {handlerLabel(item || undefined)}</span>
+      </LabeledField>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-slate-100">
       <div className={`sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur transition-[margin] duration-200 ${isSidebarCollapsed ? "md:ml-20" : "md:ml-[280px]"}`}>
@@ -2024,46 +2100,10 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {filteredMessages.length === 0 && <p className="mt-2 text-sm text-slate-500">No messages in this category.</p>}
-              <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">Closed Messages</h3>
-                    <p className="mt-1 text-xs text-slate-500">Closed items stay here so staff can restore them or delete them permanently.</p>
-                  </div>
-                  <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-500">{closedMessages.length} closed</span>
-                </div>
-                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                      <tr>
-                        <th className="px-4 py-3 font-semibold">Reference</th>
-                        <th className="px-4 py-3 font-semibold">Closed</th>
-                        <th className="px-4 py-3 font-semibold">Sender</th>
-                        <th className="px-4 py-3 font-semibold">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {closedMessages.map((m) => (
-                        <tr key={m._id} className="border-t border-slate-200 align-top">
-                          <td className="px-4 py-3 font-semibold text-slate-900">{m.referenceNo}</td>
-                          <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(m.updatedAt || m.createdAt)}</td>
-                          <td className="px-4 py-3 text-slate-700">
-                            <p>{m.name}</p>
-                            <p className="mt-1 text-xs text-slate-500">{m.department}</p>
-                            {m.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{m.adminComment}"</p> : null}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-2">
-                              {hasModulePermission("messages", "edit") ? <button className={btnSecondary} onClick={() => setPendingAction({ title: "Restore Message", message: `Restore ${m.referenceNo}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("Message restored", () => api.patch(`/api/contact/messages/${m._id}/status`, { status: "new" }, { headers: authHeaders() })) })} type="button">Restore</button> : null}
-                              {hasModulePermission("messages", "delete") ? <button className={btnDanger} onClick={() => setPendingAction({ title: "Delete Permanently", message: `Permanently delete ${m.referenceNo}? This cannot be restored.`, confirmLabel: "Delete Permanently", run: () => runActionWithFeedback("Message permanently deleted", () => api.delete(`/api/contact/messages/${m._id}`, { headers: authHeaders() })) })} type="button">Delete Permanently</button> : null}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {closedMessages.length === 0 && <p className="mt-3 text-sm text-slate-500">No closed messages yet.</p>}
+              <div className="mt-4 flex justify-end">
+                <button className={btnSecondary} onClick={() => setShowClosedMessagesModal(true)} type="button">
+                  View Closed Messages ({closedMessages.length})
+                </button>
               </div>
             </section>
           )}
@@ -2939,7 +2979,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Category"><input className={inputBase} value={reportManageModal.category} onChange={(e) => setReportManageModal((p) => p ? { ...p, category: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Description"><textarea className={inputBase} rows={3} value={reportManageModal.description} onChange={(e) => setReportManageModal((p) => p ? { ...p, description: e.target.value } : p)} /></LabeledField>
               <LabeledField label='Comment from the admins'><textarea className={inputBase} rows={3} placeholder="Resident-facing update or action taken" value={reportManageModal.adminComment || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, adminComment: e.target.value } : p)} /></LabeledField>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Handled by: {handlerLabel(reportManageModal)}</div>
+              {renderHandlerSelect(reportManageModal, setReportManageModal)}
               {reportManageModal.attachments?.[0]?.dataUrl ? <button className={btnSecondary} onClick={() => window.open(reportManageModal.attachments?.[0]?.dataUrl, "_blank", "noopener,noreferrer")} type="button">View Attachment</button> : null}
               <LabeledField label="Status">
                 <select className={inputBase} value={reportManageModal.status} onChange={(e) => setReportManageModal((p) => p ? { ...p, status: e.target.value } : p)}>
@@ -2967,7 +3007,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Address"><input className={inputBase} value={serviceManageModal.address || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, address: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Purpose"><textarea className={inputBase} rows={3} value={serviceManageModal.purpose || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, purpose: e.target.value } : p)} /></LabeledField>
               <LabeledField label='Comment from the admins'><textarea className={inputBase} rows={3} placeholder="Resident-facing update or action taken" value={serviceManageModal.adminComment || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, adminComment: e.target.value } : p)} /></LabeledField>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Handled by: {handlerLabel(serviceManageModal)}</div>
+              {renderHandlerSelect(serviceManageModal, setServiceManageModal)}
               <LabeledField label="Status">
                 <select className={inputBase} value={serviceManageModal.status} onChange={(e) => setServiceManageModal((p) => p ? { ...p, status: e.target.value } : p)}>
                   <option value="pending">pending</option>
@@ -2994,7 +3034,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Department"><input className={inputBase} value={messageManageModal.department} onChange={(e) => setMessageManageModal((p) => p ? { ...p, department: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Message"><textarea className={inputBase} rows={3} value={messageManageModal.message || ""} onChange={(e) => setMessageManageModal((p) => p ? { ...p, message: e.target.value } : p)} /></LabeledField>
               <LabeledField label='Comment from the admins'><textarea className={inputBase} rows={3} placeholder="Resident-facing update or action taken" value={messageManageModal.adminComment || ""} onChange={(e) => setMessageManageModal((p) => p ? { ...p, adminComment: e.target.value } : p)} /></LabeledField>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Handled by: {handlerLabel(messageManageModal)}</div>
+              {renderHandlerSelect(messageManageModal, setMessageManageModal)}
               <LabeledField label="Status">
                 <select className={inputBase} value={messageManageModal.status} onChange={(e) => setMessageManageModal((p) => p ? { ...p, status: e.target.value } : p)}>
                   <option value="new">new</option>
@@ -3008,6 +3048,53 @@ export default function RoleDashboard({ role }: DashboardProps) {
         </div>
       )}
 
+      {showClosedMessagesModal && (
+        <div className={modalOverlay}>
+          <div className={`${modalCard} max-w-5xl`}>
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold">Closed Messages</h3>
+                <p className="mt-1 text-sm text-slate-500">Closed messages stay here until they are restored or deleted permanently.</p>
+              </div>
+              <button className={iconBtn} onClick={() => setShowClosedMessagesModal(false)} type="button" title="Close closed messages" aria-label="Close closed messages"><X size={18} /></button>
+            </div>
+            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Reference</th>
+                    <th className="px-4 py-3 font-semibold">Closed</th>
+                    <th className="px-4 py-3 font-semibold">Sender</th>
+                    <th className="px-4 py-3 font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {closedMessages.map((m) => (
+                    <tr key={m._id} className="border-t border-slate-200 align-top">
+                      <td className="px-4 py-3 font-semibold text-slate-900">{m.referenceNo}</td>
+                      <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(m.updatedAt || m.createdAt)}</td>
+                      <td className="px-4 py-3 text-slate-700">
+                        <p>{m.name}</p>
+                        <p className="mt-1 text-xs text-slate-500">{m.department}</p>
+                        <p className="mt-1 text-xs text-slate-500">Handled by: {handlerLabel(m)}</p>
+                        {m.adminComment ? <p className="mt-1 text-xs font-semibold text-slate-700">Comment from the admins: "{m.adminComment}"</p> : null}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          {hasModulePermission("messages", "edit") ? <button className={btnSecondary} onClick={() => setPendingAction({ title: "Restore Message", message: `Restore ${m.referenceNo}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("Message restored", () => api.patch(`/api/contact/messages/${m._id}/status`, { status: "new" }, { headers: authHeaders() })) })} type="button">Restore</button> : null}
+                          {hasModulePermission("messages", "delete") ? <button className={btnDanger} onClick={() => setPendingAction({ title: "Delete Permanently", message: `Permanently delete ${m.referenceNo}? This cannot be restored.`, confirmLabel: "Delete Permanently", run: () => runActionWithFeedback("Message permanently deleted", () => api.delete(`/api/contact/messages/${m._id}`, { headers: authHeaders() })) })} type="button">Delete Permanently</button> : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {closedMessages.length === 0 && <p className="mt-3 text-sm text-slate-500">No closed messages yet.</p>}
+          </div>
+        </div>
+      )}
+
       {subscriptionManageModal && (
         <div className={modalOverlay}>
           <div className={`${modalCard} max-w-xl`}>
@@ -3016,7 +3103,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Email"><input className={inputBase} type="email" value={subscriptionManageModal.email} onChange={(e) => setSubscriptionManageModal((p) => p ? { ...p, email: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Source"><input className={inputBase} value={subscriptionManageModal.source || ""} onChange={(e) => setSubscriptionManageModal((p) => p ? { ...p, source: e.target.value } : p)} /></LabeledField>
               <LabeledField label='Comment from the admins'><textarea className={inputBase} rows={3} placeholder="Subscriber-facing update or note" value={subscriptionManageModal.adminComment || ""} onChange={(e) => setSubscriptionManageModal((p) => p ? { ...p, adminComment: e.target.value } : p)} /></LabeledField>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Handled by: {handlerLabel(subscriptionManageModal)}</div>
+              {renderHandlerSelect(subscriptionManageModal, setSubscriptionManageModal)}
               <LabeledField label="Status">
                 <select className={inputBase} value={subscriptionManageModal.status} onChange={(e) => setSubscriptionManageModal((p) => p ? { ...p, status: e.target.value as "active" | "unsubscribed" } : p)}>
                   <option value="active">active</option>

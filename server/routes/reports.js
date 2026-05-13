@@ -4,7 +4,7 @@ import IssueReport from '../models/IssueReport.js';
 import User from '../models/User.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
-import { getAdminNotificationRecipients, logSystemEvent, resolveActorDetails, sendUserMail } from '../utils/notifications.js';
+import { getAdminNotificationRecipients, logSystemEvent, publicHandlerLabel, resolveHandledByDetails, sendUserMail } from '../utils/notifications.js';
 
 const router = express.Router();
 const REPORT_STATUSES = ['new', 'in-review', 'resolved', 'rejected'];
@@ -40,12 +40,13 @@ function reportEmailHtml({ title, lines = [] }) {
 }
 
 async function notifyReportUpdate({ report, title, textTitle, actor, comment = '' }) {
+  const publicHandler = actor ? publicHandlerLabel(actor) : '';
   const lines = [
     `<strong>Reference:</strong> ${report.referenceNo}`,
     `<strong>Category:</strong> ${report.category}`,
     `<strong>Status:</strong> ${report.status}`,
     `<strong>Reporter:</strong> ${report.fullName}`,
-    actor?.name ? `<strong>Handled by:</strong> ${actor.name}${actor.role ? ` (${actor.role})` : ''}` : '',
+    publicHandler ? `<strong>Handled by:</strong> ${publicHandler}` : '',
     comment ? `<strong>Comment from the admins:</strong> ${comment}` : '',
   ];
   const text = [
@@ -54,7 +55,7 @@ async function notifyReportUpdate({ report, title, textTitle, actor, comment = '
     `Category: ${report.category}`,
     `Status: ${report.status}`,
     `Reporter: ${report.fullName}`,
-    actor?.name ? `Handled by: ${actor.name}${actor.role ? ` (${actor.role})` : ''}` : '',
+    publicHandler ? `Handled by: ${publicHandler}` : '',
     comment ? `Comment from the admins: ${comment}` : '',
   ].filter(Boolean).join('\n');
   const recipients = await getAdminNotificationRecipients();
@@ -143,7 +144,8 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
     if (!existing) {
       return res.status(404).json({ msg: 'Report not found' });
     }
-    const actor = await resolveActorDetails(req.user);
+    const previousHandler = `${existing.handledByName || ''}|${existing.handledByRole || ''}|${existing.handledByUser || ''}`;
+    const actor = await resolveHandledByDetails(req.user, req.body);
     update.handledByName = actor.name;
     update.handledByRole = actor.role;
     update.handledAt = new Date();
@@ -158,7 +160,8 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
       referenceNo: report.referenceNo,
       metadata: { action: 'update', module: 'reports' },
     });
-    if ((update.status && existing.status !== update.status) || (update.adminComment !== undefined && existing.adminComment !== update.adminComment)) {
+    const handlerChanged = previousHandler !== `${report.handledByName || ''}|${report.handledByRole || ''}|${report.handledByUser || ''}`;
+    if ((update.status && existing.status !== update.status) || (update.adminComment !== undefined && existing.adminComment !== update.adminComment) || handlerChanged) {
       await notifyReportUpdate({
         report,
         title: `Report status was updated to ${report.status}.`,
@@ -189,7 +192,8 @@ router.patch('/:id/status', auth, requireRoles('admin', 'superadmin'), requireAd
     if (!existing) {
       return res.status(404).json({ msg: 'Report not found' });
     }
-    const actor = await resolveActorDetails(req.user);
+    const previousHandler = `${existing.handledByName || ''}|${existing.handledByRole || ''}|${existing.handledByUser || ''}`;
+    const actor = await resolveHandledByDetails(req.user, req.body);
     update.handledByName = actor.name;
     update.handledByRole = actor.role;
     update.handledAt = new Date();
@@ -204,7 +208,8 @@ router.patch('/:id/status', auth, requireRoles('admin', 'superadmin'), requireAd
       referenceNo: report.referenceNo,
       metadata: { action: report.status === 'rejected' ? 'archive' : 'update', module: 'reports' },
     });
-    if ((status && existing.status !== report.status) || (adminComment !== undefined && existing.adminComment !== report.adminComment)) {
+    const handlerChanged = previousHandler !== `${report.handledByName || ''}|${report.handledByRole || ''}|${report.handledByUser || ''}`;
+    if ((status && existing.status !== report.status) || (adminComment !== undefined && existing.adminComment !== report.adminComment) || handlerChanged) {
       await notifyReportUpdate({
         report,
         title: `Report status was updated to ${report.status}.`,

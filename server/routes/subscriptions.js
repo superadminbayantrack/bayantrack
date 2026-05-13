@@ -2,7 +2,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import Subscription from '../models/Subscription.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
-import { getAdminNotificationRecipients, logSystemEvent, resolveActorDetails, sendUserMail } from '../utils/notifications.js';
+import { getAdminNotificationRecipients, logSystemEvent, publicHandlerLabel, resolveHandledByDetails, sendUserMail } from '../utils/notifications.js';
 
 const router = express.Router();
 const SUBSCRIPTION_STATUSES = ['active', 'unsubscribed'];
@@ -25,7 +25,7 @@ function subscriptionEmailHtml({ title, lines = [] }) {
 }
 
 async function notifySubscriptionUpdate({ item, title, textTitle, actor, notifySubscriber = true }) {
-  const handler = actor?.name ? `${actor.name}${actor.role ? ` (${actor.role})` : ''}` : '';
+  const handler = actor ? publicHandlerLabel(actor) : '';
   const lines = [
     `<strong>Email:</strong> ${item.email}`,
     `<strong>Status:</strong> ${item.status}`,
@@ -111,7 +111,7 @@ router.patch('/:id/status', auth, requireRoles('admin', 'superadmin'), requireAd
       return res.status(400).json({ msg: 'Invalid status' });
     }
 
-    const actor = await resolveActorDetails(req.user);
+    const actor = await resolveHandledByDetails(req.user, req.body);
     const item = await Subscription.findByIdAndUpdate(
       req.params.id,
       {
@@ -163,14 +163,16 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
     if (!existing) {
       return res.status(404).json({ msg: 'Subscription not found' });
     }
-    const actor = await resolveActorDetails(req.user);
+    const previousHandler = `${existing.handledByName || ''}|${existing.handledByRole || ''}|${existing.handledByUser || ''}`;
+    const actor = await resolveHandledByDetails(req.user, req.body);
     update.handledByName = actor.name;
     update.handledByRole = actor.role;
     update.handledAt = new Date();
     update.handledByUser = mongoose.Types.ObjectId.isValid(actor.id) ? actor.id : null;
     const item = await Subscription.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
     await logSystemEvent({ user: req.user.id, type: 'subscription', title: `Edited subscriber ${item.email}`, referenceNo: item._id.toString(), metadata: { action: 'update', module: 'subscribers' } });
-    if ((update.status && update.status !== existing.status) || (update.email && update.email !== existing.email) || (update.adminComment !== undefined && update.adminComment !== existing.adminComment)) {
+    const handlerChanged = previousHandler !== `${item.handledByName || ''}|${item.handledByRole || ''}|${item.handledByUser || ''}`;
+    if ((update.status && update.status !== existing.status) || (update.email && update.email !== existing.email) || (update.adminComment !== undefined && update.adminComment !== existing.adminComment) || handlerChanged) {
       await notifySubscriptionUpdate({
         item,
         title: 'Subscriber details were updated.',
