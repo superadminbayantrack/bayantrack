@@ -1,7 +1,7 @@
 ﻿
-import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, MapPin, Pencil, RotateCcw, Search, Settings, Shield, Trash2, UserCog, UserX, Users, X } from "lucide-react";
+import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, MapPin, MessageCircle, Pencil, RotateCcw, Search, Settings, Shield, Trash2, UserCog, UserX, Users, X } from "lucide-react";
 import { clearAuthSession, type UserRole } from "@/lib/auth";
 import { api, authHeaders } from "@/lib/api";
 import { LogoutConfirmation } from "@/components/LogoutConfirmation";
@@ -32,11 +32,25 @@ type Department = { _id: string; name: string; contactPerson: string; localNumbe
 type EvacuationCenter = { _id: string; name: string; address: string; active: boolean; capacity?: number; hazardsCovered?: string[]; notes?: string; location: { lat: number; lng: number } };
 type EmergencyHotline = { _id: string; name: string; type: string; number: string; desc?: string; when?: string[]; prepare?: string[]; active?: boolean };
 type Subscription = HandlerInfo & { _id: string; email: string; status: "active" | "unsubscribed"; source?: string; createdAt?: string; };
+type AlertChatMessage = {
+  _id?: string;
+  senderRole: "resident" | "admin" | "superadmin" | "staff";
+  senderName: string;
+  message: string;
+  createdAt: string;
+};
+type AlertTypingState = {
+  resident?: { isTyping?: boolean; name?: string; role?: string; at?: string } | null;
+  staff?: { isTyping?: boolean; name?: string; role?: string; at?: string } | null;
+};
 type EmergencyAlertItem = HandlerInfo & {
   _id: string;
   referenceNo: string;
   situation: string;
   status: "active" | "acknowledged" | "resolved" | "cancelled";
+  archived?: boolean;
+  chatMessages?: AlertChatMessage[];
+  typing?: AlertTypingState;
   residentSnapshot?: {
     userId?: string;
     username?: string;
@@ -489,6 +503,13 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [reportManageModal, setReportManageModal] = useState<ReportItem | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreview | null>(null);
   const [attachmentLoadingId, setAttachmentLoadingId] = useState<string | null>(null);
+  const [liveAlertChatModal, setLiveAlertChatModal] = useState<EmergencyAlertItem | null>(null);
+  const [liveAlertChatMessages, setLiveAlertChatMessages] = useState<AlertChatMessage[]>([]);
+  const [liveAlertChatTyping, setLiveAlertChatTyping] = useState<AlertTypingState>({});
+  const [liveAlertChatText, setLiveAlertChatText] = useState("");
+  const [liveAlertChatSending, setLiveAlertChatSending] = useState(false);
+  const liveAlertChatEndRef = useRef<HTMLDivElement | null>(null);
+  const liveAlertTypingTimerRef = useRef<number | null>(null);
   const [serviceManageModal, setServiceManageModal] = useState<ServiceRequest | null>(null);
   const [messageManageModal, setMessageManageModal] = useState<ContactMessage | null>(null);
   const [subscriptionManageModal, setSubscriptionManageModal] = useState<Subscription | null>(null);
@@ -510,6 +531,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [messageCategory, setMessageCategory] = useState("all");
   const [serviceCategory, setServiceCategory] = useState("all");
   const [reportCategory, setReportCategory] = useState("all");
+  const [liveAlertCategory, setLiveAlertCategory] = useState<"unresolved" | "resolved" | "all">("unresolved");
   const [notificationCategory, setNotificationCategory] = useState("all");
   const [restoreCategory, setRestoreCategory] = useState("users");
   const [reportSortOrder, setReportSortOrder] = useState<"newest" | "oldest">("newest");
@@ -523,7 +545,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     users: { search: "", date: "", time: "" },
     announcements: { search: "", date: "", time: "" },
     reports: { search: "", date: "", time: "" },
-    emergencyAlerts: { search: "", date: "", time: "" },
+    emergencyAlerts: { search: "", date: todayInputValue(), time: "" },
     services: { search: "", date: "", time: "" },
     messages: { search: "", date: "", time: "" },
     subscriptions: { search: "", date: "", time: "" },
@@ -609,6 +631,37 @@ export default function RoleDashboard({ role }: DashboardProps) {
   }, [role, userCategory, userApprovalCategory, activityLogDate, notificationLogDate]);
   useEffect(() => { void loadUsers(); }, [userCategory, userApprovalCategory]);
   useEffect(() => { if (!feedback) return; const t = setTimeout(() => setFeedback(null), 2800); return () => clearTimeout(t); }, [feedback]);
+  useEffect(() => () => {
+    if (liveAlertTypingTimerRef.current !== null) {
+      window.clearTimeout(liveAlertTypingTimerRef.current);
+    }
+  }, []);
+  useEffect(() => {
+    if (!liveAlertChatModal?._id) return;
+    let cancelled = false;
+    const loadChat = async () => {
+      try {
+        const res = await api.get(`/api/emergency-alerts/${liveAlertChatModal._id}/messages`, { headers: authHeaders() });
+        if (cancelled) return;
+        setLiveAlertChatMessages(Array.isArray(res.data?.messages) ? res.data.messages : []);
+        setLiveAlertChatTyping(res.data?.typing || {});
+        if (res.data?.alert) {
+          setLiveAlertChatModal((current) => current?._id === liveAlertChatModal._id ? { ...current, ...(res.data.alert || {}) } : current);
+        }
+      } catch (_err) {
+        if (!cancelled) setLiveAlertChatTyping({});
+      }
+    };
+    void loadChat();
+    const timer = window.setInterval(loadChat, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [liveAlertChatModal?._id]);
+  useEffect(() => {
+    if (liveAlertChatModal) liveAlertChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [liveAlertChatMessages, liveAlertChatModal]);
 
   const stats = useMemo(() => ({
     users: users.length,
@@ -880,6 +933,11 @@ export default function RoleDashboard({ role }: DashboardProps) {
     { value: "misinformation-rumor", label: "Misinformation / Rumor" },
     { value: "stray-animal", label: "Stray Animal" },
   ];
+  const liveAlertCategoryOptions = [
+    { value: "unresolved", label: "Unresolved" },
+    { value: "resolved", label: "Resolved" },
+    { value: "all", label: "All" },
+  ];
   const userCategoryOptions = [
     { value: "all", label: "All" },
     { value: "superadmin", label: "Superadmin" },
@@ -1023,27 +1081,33 @@ export default function RoleDashboard({ role }: DashboardProps) {
   );
   const filteredEmergencyAlerts = useMemo(
     () => emergencyAlerts
-      .filter((alert) => matchesDashboardSearch(
-        alert.referenceNo,
-        alert.situation,
-        alert.status,
-        alert.residentSnapshot?.username,
-        alert.residentSnapshot?.fullName,
-        alert.residentSnapshot?.email,
-        alert.residentSnapshot?.contactNumber,
-      ) && matchesTableFilters(
-        "emergencyAlerts",
-        alert.createdAt,
-        alert.referenceNo,
-        alert.situation,
-        alert.status,
-        alert.residentSnapshot?.username,
-        alert.residentSnapshot?.fullName,
-        alert.residentSnapshot?.email,
-        alert.residentSnapshot?.contactNumber,
-      ))
+      .filter((alert) => {
+        const unresolved = alert.status === "active" || alert.status === "acknowledged";
+        const statusMatch = liveAlertCategory === "all"
+          || (liveAlertCategory === "unresolved" && unresolved)
+          || (liveAlertCategory === "resolved" && alert.status === "resolved");
+        return statusMatch && matchesDashboardSearch(
+          alert.referenceNo,
+          alert.situation,
+          alert.status,
+          alert.residentSnapshot?.username,
+          alert.residentSnapshot?.fullName,
+          alert.residentSnapshot?.email,
+          alert.residentSnapshot?.contactNumber,
+        ) && matchesTableFilters(
+          "emergencyAlerts",
+          alert.createdAt,
+          alert.referenceNo,
+          alert.situation,
+          alert.status,
+          alert.residentSnapshot?.username,
+          alert.residentSnapshot?.fullName,
+          alert.residentSnapshot?.email,
+          alert.residentSnapshot?.contactNumber,
+        );
+      })
       .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime()),
-    [emergencyAlerts, normalizedSearch, tableFilters],
+    [emergencyAlerts, liveAlertCategory, normalizedSearch, tableFilters],
   );
   const filteredSubscriptions = useMemo(
     () => subscriptions.filter((s) => s.status !== "unsubscribed" && (subscriberCategory === "all" || s.status === subscriberCategory) && matchesDashboardSearch(s.email, s.source, s.status, s.adminComment, s.handledByName) && matchesTableFilters("subscriptions", s.createdAt, s.email, s.source, s.status, s.adminComment, s.handledByName)),
@@ -1293,6 +1357,54 @@ export default function RoleDashboard({ role }: DashboardProps) {
       setFeedback({ type: "error", title: "Attachment unavailable", message: "The uploaded file could not be opened right now." });
     } finally {
       setAttachmentLoadingId(null);
+    }
+  }
+
+  async function openLiveAlertChat(alert: EmergencyAlertItem) {
+    setLiveAlertChatModal(alert);
+    setLiveAlertChatText("");
+    try {
+      const res = await api.get(`/api/emergency-alerts/${alert._id}/messages`, { headers: authHeaders() });
+      setLiveAlertChatMessages(Array.isArray(res.data?.messages) ? res.data.messages : []);
+      setLiveAlertChatTyping(res.data?.typing || {});
+      if (res.data?.alert) {
+        setLiveAlertChatModal((current) => current?._id === alert._id ? { ...current, ...(res.data.alert || {}) } : current);
+      }
+    } catch (_err) {
+      setLiveAlertChatMessages([]);
+      setLiveAlertChatTyping({});
+    }
+  }
+
+  function markLiveAlertChatTyping(isTyping: boolean) {
+    const alertId = liveAlertChatModal?._id;
+    if (!alertId) return;
+    void api.patch(`/api/emergency-alerts/${alertId}/typing`, { isTyping }, { headers: authHeaders() }).catch(() => undefined);
+    if (liveAlertTypingTimerRef.current !== null) {
+      window.clearTimeout(liveAlertTypingTimerRef.current);
+    }
+    if (isTyping) {
+      liveAlertTypingTimerRef.current = window.setTimeout(() => {
+        void api.patch(`/api/emergency-alerts/${alertId}/typing`, { isTyping: false }, { headers: authHeaders() }).catch(() => undefined);
+      }, 1800);
+    }
+  }
+
+  async function sendLiveAlertChatMessage() {
+    const alertId = liveAlertChatModal?._id;
+    const message = liveAlertChatText.trim();
+    if (!alertId || !message || liveAlertChatSending) return;
+    setLiveAlertChatSending(true);
+    try {
+      const res = await api.post(`/api/emergency-alerts/${alertId}/messages`, { message }, { headers: authHeaders() });
+      setLiveAlertChatMessages(Array.isArray(res.data?.messages) ? res.data.messages : []);
+      setLiveAlertChatTyping(res.data?.typing || {});
+      setLiveAlertChatText("");
+      markLiveAlertChatTyping(false);
+    } catch (err: any) {
+      setFeedback({ type: "error", title: "Message failed", message: err?.response?.data?.msg || "Could not send the live chat message." });
+    } finally {
+      setLiveAlertChatSending(false);
     }
   }
 
@@ -2231,12 +2343,13 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold">Live Emergency Alerts</h2>
-                  <p className="mt-1 text-sm text-slate-500">Realtime resident location shares from the chatbot during urgent situations.</p>
+                  <p className="mt-1 text-sm text-slate-500">Daily live location shares and chat updates from residents during urgent situations.</p>
                 </div>
                 <div className="rounded-full border border-red-100 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700">
                   {stats.liveAlerts} active
                 </div>
               </div>
+              <CategoryFilter title="Alert View" options={liveAlertCategoryOptions} value={liveAlertCategory} onChange={(next) => setLiveAlertCategory(next as typeof liveAlertCategory)} />
               <PanelSearchFilters value={tableFilters.emergencyAlerts} onChange={(next) => updateTableFilter("emergencyAlerts", next)} placeholder="Search live alerts..." />
               <div className="overflow-x-auto rounded-2xl border border-slate-200">
                 <table className="min-w-full text-left text-sm">
@@ -2287,9 +2400,46 @@ export default function RoleDashboard({ role }: DashboardProps) {
                               ) : null}
                             </div>
                           </td>
-                          <td className="px-4 py-3"><Badge value={alert.status} /></td>
+                          <td className="px-4 py-3">
+                            <div className="min-w-[190px] space-y-3">
+                              <Badge value={alert.status} />
+                              <div className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-xs">
+                                <label className="mb-1 flex cursor-pointer items-center gap-2 font-semibold text-slate-700">
+                                  <input
+                                    type="radio"
+                                    className="accent-slate-900"
+                                    checked={alert.status === "active" || alert.status === "acknowledged"}
+                                    onChange={() => setPendingAction({
+                                      title: "Mark Live Alert Unresolved",
+                                      message: `Move ${alert.referenceNo} back to the unresolved list?`,
+                                      confirmLabel: "Mark Unresolved",
+                                      run: () => runActionWithFeedback("Live alert marked unresolved", () => api.patch(`/api/emergency-alerts/${alert._id}/status`, { status: "active" }, { headers: authHeaders() })),
+                                    })}
+                                  />
+                                  Unresolved
+                                </label>
+                                <label className="flex cursor-pointer items-center gap-2 font-semibold text-slate-700">
+                                  <input
+                                    type="radio"
+                                    className="accent-emerald-600"
+                                    checked={alert.status === "resolved"}
+                                    onChange={() => setPendingAction({
+                                      title: "Resolve Live Alert",
+                                      message: `Mark ${alert.referenceNo} as resolved?`,
+                                      confirmLabel: "Resolve",
+                                      run: () => runActionWithFeedback("Live alert resolved", () => api.patch(`/api/emergency-alerts/${alert._id}/status`, { status: "resolved" }, { headers: authHeaders() })),
+                                    })}
+                                  />
+                                  Resolved
+                                </label>
+                              </div>
+                            </div>
+                          </td>
                           <td className="px-4 py-3">
                             <div className="flex flex-wrap gap-2">
+                              <button className={btnSecondary} onClick={() => void openLiveAlertChat(alert)} type="button">
+                                <MessageCircle size={14} className="mr-1" /> Live Chat
+                              </button>
                               {alert.status === "active" ? (
                                 <button
                                   className={btnSecondary}
@@ -2308,6 +2458,24 @@ export default function RoleDashboard({ role }: DashboardProps) {
                                   Resolve
                                 </button>
                               ) : null}
+                              <button
+                                className={iconBtn}
+                                onClick={() => setPendingAction({ title: "Archive Live Alert", message: `Archive ${alert.referenceNo}? It will be hidden from the daily list.`, confirmLabel: "Archive", run: () => runActionWithFeedback("Live alert archived", () => api.patch(`/api/emergency-alerts/${alert._id}/archive`, { archived: true }, { headers: authHeaders() })) })}
+                                type="button"
+                                title="Archive live alert"
+                                aria-label="Archive live alert"
+                              >
+                                <Archive size={16} />
+                              </button>
+                              <button
+                                className={iconBtnDanger}
+                                onClick={() => setPendingAction({ title: "Delete Live Alert", message: `Permanently delete ${alert.referenceNo}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Live alert deleted", () => api.delete(`/api/emergency-alerts/${alert._id}`, { headers: authHeaders() })) })}
+                                type="button"
+                                title="Delete live alert"
+                                aria-label="Delete live alert"
+                              >
+                                <Trash2 size={16} />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -3414,6 +3582,122 @@ export default function RoleDashboard({ role }: DashboardProps) {
             <div className="mt-4 flex flex-wrap justify-end gap-2">
               <a className={btnSecondary} href={attachmentPreview.dataUrl} rel="noopener noreferrer" target="_blank">Open Full Size</a>
               <button className={btnPrimary} onClick={() => setAttachmentPreview(null)} type="button">Done</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {liveAlertChatModal && (
+        <div className={modalOverlay}>
+          <div className={`${modalCard} max-w-4xl`}>
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-600">Live Emergency Chat</p>
+                <h3 className="mt-1 text-lg font-bold text-slate-900">{liveAlertChatModal.referenceNo}</h3>
+                <p className="mt-1 text-sm text-slate-500">{liveAlertChatModal.situation}</p>
+              </div>
+              <button className={iconBtn} onClick={() => setLiveAlertChatModal(null)} type="button" title="Close live chat" aria-label="Close live chat">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mb-4 grid gap-3 lg:grid-cols-[280px,1fr]">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
+                <p className="font-bold text-slate-900">{liveAlertChatModal.residentSnapshot?.fullName || "Resident"}</p>
+                <div className="mt-3 space-y-1 text-xs text-slate-600">
+                  <p><span className="font-semibold text-slate-500">Username:</span> {liveAlertChatModal.residentSnapshot?.username || "N/A"}</p>
+                  <p><span className="font-semibold text-slate-500">ID:</span> {liveAlertChatModal.residentSnapshot?.userId || "N/A"}</p>
+                  <p><span className="font-semibold text-slate-500">Age:</span> {liveAlertChatModal.residentSnapshot?.age || "Not recorded"}</p>
+                  <p><span className="font-semibold text-slate-500">Email:</span> {liveAlertChatModal.residentSnapshot?.email || "N/A"}</p>
+                  <p><span className="font-semibold text-slate-500">Number:</span> {liveAlertChatModal.residentSnapshot?.contactNumber || "N/A"}</p>
+                </div>
+                <div className="mt-4 space-y-2">
+                  <Badge value={liveAlertChatModal.status} />
+                  {googleMapsUrl(liveAlertChatModal.currentLocation) ? (
+                    <a className={`${btnSecondary} w-full`} href={googleMapsUrl(liveAlertChatModal.currentLocation)} target="_blank" rel="noopener noreferrer">
+                      <MapPin size={14} className="mr-1" /> Open Google Maps
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="flex min-h-[420px] flex-col rounded-2xl border border-slate-200 bg-white">
+                <div className="border-b border-slate-100 px-4 py-3">
+                  <p className="text-sm font-bold text-slate-900">Conversation</p>
+                  <p className="text-xs text-slate-500">Messages refresh automatically every few seconds.</p>
+                </div>
+                <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4">
+                  {liveAlertChatMessages.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-sm text-slate-500">
+                      No messages yet. Send the first instruction or ask for an update.
+                    </div>
+                  ) : liveAlertChatMessages.map((item, index) => {
+                    const fromStaff = item.senderRole === "admin" || item.senderRole === "superadmin" || item.senderRole === "staff";
+                    return (
+                      <div key={item._id || `${item.createdAt}-${index}`} className={`flex ${fromStaff ? "justify-end" : "justify-start"}`}>
+                        <div className={`max-w-[78%] rounded-2xl px-3 py-2 text-sm leading-5 shadow-sm ${fromStaff ? "rounded-br-sm bg-slate-900 text-white" : "rounded-bl-sm border border-slate-200 bg-white text-slate-700"}`}>
+                          <div className={`mb-1 flex items-center justify-between gap-3 text-[11px] font-semibold ${fromStaff ? "text-white/70" : "text-slate-500"}`}>
+                            <span>{fromStaff ? "Barangay staff" : item.senderName || "Resident"}</span>
+                            <span>{formatDateTime(item.createdAt)}</span>
+                          </div>
+                          <p className="whitespace-pre-wrap">{item.message}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {liveAlertChatTyping?.resident?.isTyping ? (
+                    <p className="text-xs font-semibold text-emerald-700">{liveAlertChatTyping.resident.name || "Resident"} is typing...</p>
+                  ) : null}
+                  <div ref={liveAlertChatEndRef} />
+                </div>
+                <div className="border-t border-slate-100 p-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={liveAlertChatText}
+                      onChange={(e) => {
+                        setLiveAlertChatText(e.target.value);
+                        markLiveAlertChatTyping(Boolean(e.target.value.trim()));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void sendLiveAlertChatMessage();
+                      }}
+                      placeholder="Type instruction or update for the resident..."
+                      className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:bg-white"
+                    />
+                    <button
+                      className={btnPrimary}
+                      disabled={!liveAlertChatText.trim() || liveAlertChatSending}
+                      onClick={() => void sendLiveAlertChatMessage()}
+                      type="button"
+                    >
+                      Send
+                    </button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      className={btnSecondary}
+                      onClick={() => setPendingAction({ title: "Mark Live Alert Unresolved", message: `Move ${liveAlertChatModal.referenceNo} back to unresolved?`, confirmLabel: "Mark Unresolved", run: () => runActionWithFeedback("Live alert marked unresolved", () => api.patch(`/api/emergency-alerts/${liveAlertChatModal._id}/status`, { status: "active" }, { headers: authHeaders() })) })}
+                      type="button"
+                    >
+                      Unresolved
+                    </button>
+                    <button
+                      className={btnPrimary}
+                      onClick={() => setPendingAction({ title: "Resolve Live Alert", message: `Mark ${liveAlertChatModal.referenceNo} as resolved?`, confirmLabel: "Resolve", run: () => runActionWithFeedback("Live alert resolved", () => api.patch(`/api/emergency-alerts/${liveAlertChatModal._id}/status`, { status: "resolved" }, { headers: authHeaders() })) })}
+                      type="button"
+                    >
+                      Resolved
+                    </button>
+                    <button
+                      className={btnSecondary}
+                      onClick={() => setPendingAction({ title: "Archive Live Alert", message: `Archive ${liveAlertChatModal.referenceNo}?`, confirmLabel: "Archive", run: () => runActionWithFeedback("Live alert archived", () => api.patch(`/api/emergency-alerts/${liveAlertChatModal._id}/archive`, { archived: true }, { headers: authHeaders() })).then(() => setLiveAlertChatModal(null)) })}
+                      type="button"
+                    >
+                      Archive
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

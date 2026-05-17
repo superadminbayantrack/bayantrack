@@ -8,6 +8,7 @@ import { logSystemEvent, resolveActorDetails } from '../utils/notifications.js';
 
 const router = express.Router();
 const ALERT_STATUSES = ['active', 'acknowledged', 'resolved', 'cancelled'];
+const CHAT_MESSAGE_LIMIT = 200;
 
 function normalizeSituation(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -77,6 +78,86 @@ async function writeAlertEvent({ userId, type, title, referenceNo, metadata = {}
   });
 }
 
+function isStaffUser(userPayload = {}) {
+  return ['admin', 'superadmin'].includes(userPayload.role);
+}
+
+function normalizeChatMessage(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+}
+
+function freshTypingState(value = {}) {
+  if (!value?.isTyping || !value?.at) return null;
+  const typedAt = new Date(value.at);
+  if (Number.isNaN(typedAt.getTime())) return null;
+  if (Date.now() - typedAt.getTime() > 7000) return null;
+  return {
+    isTyping: true,
+    name: value.name || '',
+    role: value.role || '',
+    at: typedAt,
+  };
+}
+
+function alertChatPayload(alert) {
+  const item = typeof alert.toObject === 'function' ? alert.toObject() : alert;
+  return {
+    alert: {
+      _id: item._id,
+      referenceNo: item.referenceNo,
+      situation: item.situation,
+      status: item.status,
+      archived: item.archived,
+      residentSnapshot: item.residentSnapshot,
+      currentLocation: item.currentLocation,
+      updatedAt: item.updatedAt,
+    },
+    messages: item.chatMessages || [],
+    typing: {
+      resident: freshTypingState(item.typing?.resident),
+      staff: freshTypingState(item.typing?.staff),
+    },
+  };
+}
+
+async function findAccessibleAlert(req, res) {
+  const alert = await EmergencyAlert.findById(req.params.id);
+  if (!alert) {
+    res.status(404).json({ msg: 'Live alert not found.' });
+    return null;
+  }
+
+  const isOwner = String(alert.user) === String(req.user.id);
+  if (!isOwner && !isStaffUser(req.user)) {
+    res.status(403).json({ msg: 'Forbidden' });
+    return null;
+  }
+
+  return alert;
+}
+
+async function getChatSender(req, alert) {
+  if (isStaffUser(req.user)) {
+    const actor = await resolveActorDetails(req.user);
+    return {
+      senderUser: String(actor.id || req.user.id || ''),
+      senderRole: actor.role || req.user.role || 'staff',
+      senderName: actor.name || 'Barangay Staff',
+      typingKey: 'staff',
+    };
+  }
+
+  const user = await User.findById(req.user.id).select('username firstName middleName lastName email').lean();
+  const childName = req.user.actingChild?.fullName || '';
+  const name = childName || fullName(user) || user?.username || alert.residentSnapshot?.fullName || 'Resident';
+  return {
+    senderUser: String(req.user.id || ''),
+    senderRole: 'resident',
+    senderName: name,
+    typingKey: 'resident',
+  };
+}
+
 router.post('/', auth, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(String(req.user.id))) {
@@ -128,12 +209,99 @@ router.post('/', auth, async (req, res) => {
 router.get('/', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
   try {
     const status = String(req.query.status || '').trim();
-    const query = ALERT_STATUSES.includes(status) ? { status } : {};
+    const includeArchived = String(req.query.includeArchived || '').toLowerCase() === 'true';
+    const query = {
+      ...(ALERT_STATUSES.includes(status) ? { status } : {}),
+      ...(includeArchived ? {} : { archived: { $ne: true } }),
+    };
     const alerts = await EmergencyAlert.find(query).sort({ updatedAt: -1, createdAt: -1 }).limit(100).lean();
     return res.json(alerts);
   } catch (err) {
     console.error('Failed to fetch emergency alerts:', err);
     return res.status(500).json({ msg: 'Failed to fetch live emergency alerts.' });
+  }
+});
+
+router.get('/:id/messages', auth, async (req, res) => {
+  try {
+    const alert = await findAccessibleAlert(req, res);
+    if (!alert) return null;
+    return res.json(alertChatPayload(alert));
+  } catch (err) {
+    console.error('Failed to fetch emergency alert chat:', err);
+    return res.status(500).json({ msg: 'Failed to load live alert chat.' });
+  }
+});
+
+router.post('/:id/messages', auth, async (req, res) => {
+  try {
+    const alert = await findAccessibleAlert(req, res);
+    if (!alert) return null;
+
+    if (!['active', 'acknowledged'].includes(alert.status) && !isStaffUser(req.user)) {
+      return res.status(409).json({ msg: 'This live alert chat is already closed.' });
+    }
+
+    const message = normalizeChatMessage(req.body.message);
+    if (!message) {
+      return res.status(400).json({ msg: 'Message is required.' });
+    }
+
+    const sender = await getChatSender(req, alert);
+    alert.chatMessages.push({
+      senderUser: sender.senderUser,
+      senderRole: sender.senderRole,
+      senderName: sender.senderName,
+      message,
+      createdAt: new Date(),
+    });
+    if (alert.chatMessages.length > CHAT_MESSAGE_LIMIT) {
+      alert.chatMessages = alert.chatMessages.slice(-CHAT_MESSAGE_LIMIT);
+    }
+    alert.typing = alert.typing || {};
+    alert.typing[sender.typingKey] = {
+      isTyping: false,
+      name: sender.senderName,
+      role: sender.senderRole,
+      at: new Date(),
+    };
+    await alert.save();
+
+    await writeAlertEvent({
+      userId: req.user.id,
+      type: 'emergency-alert',
+      title: `Live alert chat updated: ${alert.referenceNo}`,
+      referenceNo: alert.referenceNo,
+      metadata: { action: 'chat-message', situation: alert.situation },
+      notifySuperadmin: isStaffUser(req.user) ? false : true,
+    });
+
+    return res.status(201).json(alertChatPayload(alert));
+  } catch (err) {
+    console.error('Failed to send emergency alert chat message:', err);
+    return res.status(500).json({ msg: 'Failed to send live chat message.' });
+  }
+});
+
+router.patch('/:id/typing', auth, async (req, res) => {
+  try {
+    const alert = await findAccessibleAlert(req, res);
+    if (!alert) return null;
+
+    const sender = await getChatSender(req, alert);
+    const isTyping = req.body.isTyping !== false;
+    alert.typing = alert.typing || {};
+    alert.typing[sender.typingKey] = {
+      isTyping,
+      name: sender.senderName,
+      role: sender.senderRole,
+      at: new Date(),
+    };
+    await alert.save();
+    return res.json(alertChatPayload(alert));
+  } catch (err) {
+    console.error('Failed to update emergency alert typing:', err);
+    return res.status(500).json({ msg: 'Failed to update live chat typing status.' });
   }
 });
 
@@ -210,6 +378,7 @@ router.patch('/:id/status', auth, requireRoles('admin', 'superadmin'), async (re
     }
 
     const actor = await resolveActorDetails(req.user);
+    const handledAt = new Date();
     const alert = await EmergencyAlert.findByIdAndUpdate(
       req.params.id,
       {
@@ -218,7 +387,8 @@ router.patch('/:id/status', auth, requireRoles('admin', 'superadmin'), async (re
         handledByName: actor.name,
         handledByRole: actor.role,
         handledByUser: mongoose.Types.ObjectId.isValid(String(actor.id)) ? actor.id : null,
-        handledAt: new Date(),
+        handledAt,
+        ...(status === 'resolved' ? { 'typing.resident.isTyping': false, 'typing.staff.isTyping': false } : {}),
       },
       { returnDocument: 'after' },
     );
@@ -239,6 +409,63 @@ router.patch('/:id/status', auth, requireRoles('admin', 'superadmin'), async (re
   } catch (err) {
     console.error('Failed to update emergency alert status:', err);
     return res.status(500).json({ msg: 'Failed to update live alert status.' });
+  }
+});
+
+router.patch('/:id/archive', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
+  try {
+    const archived = req.body.archived !== false;
+    const actor = await resolveActorDetails(req.user);
+    const alert = await EmergencyAlert.findByIdAndUpdate(
+      req.params.id,
+      {
+        archived,
+        handledByName: actor.name,
+        handledByRole: actor.role,
+        handledByUser: mongoose.Types.ObjectId.isValid(String(actor.id)) ? actor.id : null,
+        handledAt: new Date(),
+      },
+      { returnDocument: 'after' },
+    );
+
+    if (!alert) {
+      return res.status(404).json({ msg: 'Live alert not found.' });
+    }
+
+    await writeAlertEvent({
+      userId: req.user.id,
+      type: 'emergency-alert',
+      title: `${archived ? 'Archived' : 'Restored'} live emergency alert: ${alert.referenceNo}`,
+      referenceNo: alert.referenceNo,
+      metadata: { action: archived ? 'archive' : 'restore', situation: alert.situation },
+    });
+
+    return res.json(alert);
+  } catch (err) {
+    console.error('Failed to archive emergency alert:', err);
+    return res.status(500).json({ msg: 'Failed to archive live alert.' });
+  }
+});
+
+router.delete('/:id', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
+  try {
+    const alert = await EmergencyAlert.findByIdAndDelete(req.params.id);
+    if (!alert) {
+      return res.status(404).json({ msg: 'Live alert not found.' });
+    }
+
+    await writeAlertEvent({
+      userId: req.user.id,
+      type: 'emergency-alert',
+      title: `Deleted live emergency alert: ${alert.referenceNo}`,
+      referenceNo: alert.referenceNo,
+      metadata: { action: 'delete', situation: alert.situation },
+    });
+
+    return res.json({ msg: 'Live alert deleted.' });
+  } catch (err) {
+    console.error('Failed to delete emergency alert:', err);
+    return res.status(500).json({ msg: 'Failed to delete live alert.' });
   }
 });
 

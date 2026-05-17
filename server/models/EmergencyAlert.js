@@ -25,6 +25,31 @@ const ResidentSnapshotSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const AlertChatMessageSchema = new mongoose.Schema(
+  {
+    senderUser: { type: String, default: '' },
+    senderRole: {
+      type: String,
+      enum: ['resident', 'admin', 'superadmin', 'staff'],
+      default: 'resident',
+    },
+    senderName: { type: String, default: 'Resident' },
+    message: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: true },
+);
+
+const AlertTypingSchema = new mongoose.Schema(
+  {
+    isTyping: { type: Boolean, default: false },
+    name: { type: String, default: '' },
+    role: { type: String, default: '' },
+    at: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const EmergencyAlertSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -38,7 +63,13 @@ const EmergencyAlertSchema = new mongoose.Schema(
     residentSnapshot: { type: ResidentSnapshotSchema, default: () => ({}) },
     currentLocation: { type: LocationPointSchema, required: true },
     locationHistory: { type: [LocationPointSchema], default: [] },
+    chatMessages: { type: [AlertChatMessageSchema], default: [] },
+    typing: {
+      resident: { type: AlertTypingSchema, default: () => ({}) },
+      staff: { type: AlertTypingSchema, default: () => ({}) },
+    },
     adminComment: { type: String, default: '' },
+    archived: { type: Boolean, default: false },
     handledByUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     handledByName: { type: String, default: '' },
     handledByRole: { type: String, default: '' },
@@ -48,6 +79,7 @@ const EmergencyAlertSchema = new mongoose.Schema(
 );
 
 EmergencyAlertSchema.index({ status: 1, updatedAt: -1 });
+EmergencyAlertSchema.index({ archived: 1, status: 1, updatedAt: -1 });
 EmergencyAlertSchema.index({ user: 1, createdAt: -1 });
 
 export default mongoose.model('EmergencyAlert', EmergencyAlertSchema);

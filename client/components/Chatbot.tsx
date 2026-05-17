@@ -7,7 +7,7 @@ const cn = (...classes: (string | undefined | null | false)[]) => classes.filter
 
 type ActionDef = {
   label: string;
-  type: "link" | "call" | "location" | "stop-location";
+  type: "link" | "call" | "location" | "stop-location" | "open-live-chat";
   payload: string;
 };
 
@@ -41,6 +41,17 @@ type LiveKnowledge = {
   announcements: LiveAnnouncement[];
   services: LiveService[];
   departments: LiveDepartment[];
+};
+type LiveChatMessage = {
+  _id?: string;
+  senderRole: "resident" | "admin" | "superadmin" | "staff";
+  senderName: string;
+  message: string;
+  createdAt: string;
+};
+type LiveTypingState = {
+  resident?: { isTyping?: boolean; name?: string; role?: string; at?: string } | null;
+  staff?: { isTyping?: boolean; name?: string; role?: string; at?: string } | null;
 };
 
 const EMERGENCY_INTENTS: EmergencyIntent[] = [
@@ -249,9 +260,17 @@ export function Chatbot() {
   const [liveServices, setLiveServices] = useState<LiveService[]>([]);
   const [liveDepartments, setLiveDepartments] = useState<LiveDepartment[]>([]);
   const [activeEmergencyAlertId, setActiveEmergencyAlertId] = useState<string | null>(null);
+  const [liveEmergencyChatOpen, setLiveEmergencyChatOpen] = useState(false);
+  const [liveEmergencyChatMessages, setLiveEmergencyChatMessages] = useState<LiveChatMessage[]>([]);
+  const [liveEmergencyTyping, setLiveEmergencyTyping] = useState<LiveTypingState>({});
+  const [liveEmergencyStatus, setLiveEmergencyStatus] = useState("");
+  const [liveChatInput, setLiveChatInput] = useState("");
+  const [liveChatSending, setLiveChatSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const liveChatEndRef = useRef<HTMLDivElement>(null);
   const locationWatchRef = useRef<number | null>(null);
   const activeEmergencyAlertIdRef = useRef<string | null>(null);
+  const liveChatTypingTimerRef = useRef<number | null>(null);
   const lastLocationPatchAtRef = useRef(0);
   const lastEmergencySituationRef = useRef("Emergency assistance requested");
   const [messages, setMessages] = useState<Message[]>([
@@ -274,12 +293,19 @@ export function Chatbot() {
   }, [messages, isOpen]);
 
   useEffect(() => {
+    if (isOpen && liveEmergencyChatOpen) liveChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [liveEmergencyChatMessages, liveEmergencyChatOpen, isOpen]);
+
+  useEffect(() => {
     activeEmergencyAlertIdRef.current = activeEmergencyAlertId;
   }, [activeEmergencyAlertId]);
 
   useEffect(() => () => {
     if (locationWatchRef.current !== null && navigator.geolocation) {
       navigator.geolocation.clearWatch(locationWatchRef.current);
+    }
+    if (liveChatTypingTimerRef.current !== null) {
+      window.clearTimeout(liveChatTypingTimerRef.current);
     }
   }, []);
 
@@ -303,6 +329,29 @@ export function Chatbot() {
     };
     void loadKnowledge();
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !liveEmergencyChatOpen || !activeEmergencyAlertId) return;
+    let cancelled = false;
+    const loadLiveChat = async () => {
+      try {
+        const res = await api.get(`/api/emergency-alerts/${activeEmergencyAlertId}/messages`);
+        if (cancelled) return;
+        setLiveEmergencyChatMessages(Array.isArray(res.data?.messages) ? res.data.messages : []);
+        setLiveEmergencyTyping(res.data?.typing || {});
+        setLiveEmergencyStatus(res.data?.alert?.status || "");
+      } catch {
+        if (!cancelled) setLiveEmergencyTyping({});
+      }
+    };
+
+    void loadLiveChat();
+    const timer = window.setInterval(loadLiveChat, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isOpen, liveEmergencyChatOpen, activeEmergencyAlertId]);
 
   const processMessage = (text: string): Message => {
     const cleaned = normalize(text);
@@ -409,6 +458,7 @@ export function Chatbot() {
 
     if (activeEmergencyAlertIdRef.current) {
       appendBotMessage("Live location sharing is already active. Keep this page open so the dashboard can keep receiving your latest location.", [
+        { label: "Open Live Chat", type: "open-live-chat", payload: activeEmergencyAlertIdRef.current },
         { label: "Stop Live Location Sharing", type: "stop-location", payload: activeEmergencyAlertIdRef.current },
       ]);
       return;
@@ -429,10 +479,47 @@ export function Chatbot() {
       startLiveLocationWatch(alertId);
       appendBotMessage(
         "Live location is now being shared with barangay staff. Keep this page open if you can, and move to a safe place first.",
-        [{ label: "Stop Live Location Sharing", type: "stop-location", payload: alertId }],
+        [
+          { label: "Open Live Chat", type: "open-live-chat", payload: alertId },
+          { label: "Stop Live Location Sharing", type: "stop-location", payload: alertId },
+        ],
       );
+      setLiveEmergencyChatOpen(true);
     } catch (_err) {
       appendBotMessage("Hindi naipadala ang live location ngayon. Please allow location permission, then try again, or type your exact address/landmark.");
+    }
+  };
+
+  const markLiveChatTyping = (isTyping: boolean) => {
+    const alertId = activeEmergencyAlertIdRef.current;
+    if (!alertId) return;
+    void api.patch(`/api/emergency-alerts/${alertId}/typing`, { isTyping }).catch(() => undefined);
+    if (liveChatTypingTimerRef.current !== null) {
+      window.clearTimeout(liveChatTypingTimerRef.current);
+    }
+    if (isTyping) {
+      liveChatTypingTimerRef.current = window.setTimeout(() => {
+        void api.patch(`/api/emergency-alerts/${alertId}/typing`, { isTyping: false }).catch(() => undefined);
+      }, 1800);
+    }
+  };
+
+  const sendLiveChatMessage = async () => {
+    const alertId = activeEmergencyAlertIdRef.current;
+    const message = liveChatInput.trim();
+    if (!alertId || !message || liveChatSending) return;
+    setLiveChatSending(true);
+    try {
+      const res = await api.post(`/api/emergency-alerts/${alertId}/messages`, { message });
+      setLiveEmergencyChatMessages(Array.isArray(res.data?.messages) ? res.data.messages : []);
+      setLiveEmergencyTyping(res.data?.typing || {});
+      setLiveEmergencyStatus(res.data?.alert?.status || liveEmergencyStatus);
+      setLiveChatInput("");
+      markLiveChatTyping(false);
+    } catch (_err) {
+      appendBotMessage("Hindi na-send ang live chat message ngayon. Please try again or call the hotline kung urgent.");
+    } finally {
+      setLiveChatSending(false);
     }
   };
 
@@ -444,6 +531,8 @@ export function Chatbot() {
     }
     setActiveEmergencyAlertId(null);
     activeEmergencyAlertIdRef.current = null;
+    setLiveEmergencyChatOpen(false);
+    setLiveEmergencyStatus("cancelled");
     if (alertId) {
       await api.patch(`/api/emergency-alerts/${alertId}/cancel`, {
         reason: "Live sharing stopped by resident.",
@@ -465,6 +554,13 @@ export function Chatbot() {
 
     if (action.type === "stop-location") {
       void stopLiveLocationAlert();
+      return;
+    }
+
+    if (action.type === "open-live-chat") {
+      setActiveEmergencyAlertId(action.payload || activeEmergencyAlertIdRef.current);
+      activeEmergencyAlertIdRef.current = action.payload || activeEmergencyAlertIdRef.current;
+      setLiveEmergencyChatOpen(true);
       return;
     }
 
@@ -535,16 +631,18 @@ export function Chatbot() {
                         <button
                           key={`${action.type}-${action.label}`}
                           onClick={() => handleActionClick(action)}
-                          className={cn(
-                            "inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-center text-sm font-bold shadow-sm transition-all",
-                            action.type === "call"
-                              ? "bg-red-600 text-white hover:bg-red-700"
-                              : action.type === "location"
-                                ? "bg-slate-800 text-white hover:bg-slate-900"
-                                : action.type === "stop-location"
-                                  ? "bg-red-100 text-red-700 hover:bg-red-200"
-                                  : "bg-[#638ECB] text-white hover:bg-[#4b77b8]",
-                          )}
+                    className={cn(
+                      "inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-center text-sm font-bold shadow-sm transition-all",
+                      action.type === "call"
+                        ? "bg-red-600 text-white hover:bg-red-700"
+                        : action.type === "location"
+                          ? "bg-slate-800 text-white hover:bg-slate-900"
+                          : action.type === "stop-location"
+                            ? "bg-red-100 text-red-700 hover:bg-red-200"
+                            : action.type === "open-live-chat"
+                              ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                              : "bg-[#638ECB] text-white hover:bg-[#4b77b8]",
+                    )}
                           type="button"
                         >
                           {action.label}
@@ -571,10 +669,79 @@ export function Chatbot() {
                 ) : null}
               </div>
             ))}
+
+            {activeEmergencyAlertId && liveEmergencyChatOpen ? (
+              <div className="rounded-2xl border border-emerald-100 bg-white p-3 shadow-sm">
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">Live Chat with Barangay Staff</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-600">
+                      {liveEmergencyStatus ? `Alert status: ${liveEmergencyStatus}` : "Emergency thread active"}
+                    </p>
+                  </div>
+                  <button className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-100" onClick={() => setLiveEmergencyChatOpen(false)} type="button">Hide</button>
+                </div>
+                <div className="max-h-56 space-y-2 overflow-y-auto rounded-xl bg-slate-50 p-3">
+                  {liveEmergencyChatMessages.length === 0 ? (
+                    <p className="text-xs text-slate-500">Wala pang chat message. I-type ang update mo para makita ng barangay staff.</p>
+                  ) : liveEmergencyChatMessages.map((item, index) => {
+                    const fromResident = item.senderRole === "resident";
+                    return (
+                      <div key={item._id || `${item.createdAt}-${index}`} className={`flex ${fromResident ? "justify-end" : "justify-start"}`}>
+                        <div className={cn(
+                          "max-w-[82%] rounded-2xl px-3 py-2 text-xs leading-5 shadow-sm",
+                          fromResident ? "rounded-br-sm bg-[#3b528a] text-white" : "rounded-bl-sm border border-emerald-100 bg-white text-slate-700",
+                        )}>
+                          <p className={fromResident ? "text-white/75" : "text-emerald-700"}>{fromResident ? "You" : item.senderName || "Barangay staff"}</p>
+                          <p className="mt-0.5 whitespace-pre-wrap">{item.message}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {liveEmergencyTyping?.staff?.isTyping ? (
+                    <p className="text-xs font-semibold text-emerald-700">{liveEmergencyTyping.staff.name || "Barangay staff"} is typing...</p>
+                  ) : null}
+                  <div ref={liveChatEndRef} />
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <input
+                    value={liveChatInput}
+                    onChange={(e) => {
+                      setLiveChatInput(e.target.value);
+                      markLiveChatTyping(Boolean(e.target.value.trim()));
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void sendLiveChatMessage();
+                    }}
+                    placeholder="Update mo ang staff dito..."
+                    className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-medium outline-none focus:border-emerald-400 focus:bg-white"
+                  />
+                  <button
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!liveChatInput.trim() || liveChatSending}
+                    onClick={() => void sendLiveChatMessage()}
+                    type="button"
+                    aria-label="Send live chat message"
+                  >
+                    <Send size={16} />
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <div ref={messagesEndRef} />
           </div>
 
           <div className="shrink-0 border-t border-gray-100 bg-white p-4">
+            {activeEmergencyAlertId && !liveEmergencyChatOpen ? (
+              <button
+                className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700"
+                onClick={() => setLiveEmergencyChatOpen(true)}
+                type="button"
+              >
+                <MessageCircle size={16} />
+                Open Live Emergency Chat
+              </button>
+            ) : null}
             <div className="relative flex items-center">
               <input
                 type="text"
