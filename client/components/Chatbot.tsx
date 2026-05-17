@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Maximize2, MessageCircle, Minimize2, Send, Sparkles, X } from "lucide-react";
 import { api } from "@/lib/api";
+import { getToken } from "@/lib/auth";
 
 const cn = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ");
 
 type ActionDef = {
   label: string;
-  type: "link" | "call" | "location";
+  type: "link" | "call" | "location" | "stop-location";
   payload: string;
 };
 
@@ -57,7 +58,7 @@ const EMERGENCY_INTENTS: EmergencyIntent[] = [
     actions: [
       { label: "Call 911", type: "call", payload: "911" },
       { label: "Call Barangay Hotline", type: "call", payload: "0464170000" },
-      { label: "Share Location", type: "location", payload: "" },
+      { label: "Send Current Live Location", type: "location", payload: "Emergency assistance requested" },
     ],
   },
   {
@@ -72,7 +73,7 @@ const EMERGENCY_INTENTS: EmergencyIntent[] = [
     actions: [
       { label: "Call Fire Department", type: "call", payload: "0464176060" },
       { label: "Find Evacuation Center", type: "link", payload: "/announcements/barangay-updates" },
-      { label: "Share Location", type: "location", payload: "" },
+      { label: "Send Current Live Location", type: "location", payload: "Fire, flood, earthquake, or evacuation concern" },
     ],
   },
   {
@@ -87,6 +88,7 @@ const EMERGENCY_INTENTS: EmergencyIntent[] = [
     actions: [
       { label: "Call Police", type: "call", payload: "0464176366" },
       { label: "Call Barangay Hotline", type: "call", payload: "0464170000" },
+      { label: "Send Current Live Location", type: "location", payload: "Crime or safety threat" },
       { label: "Report Issue", type: "link", payload: "/ReportIssue" },
     ],
   },
@@ -102,7 +104,7 @@ const EMERGENCY_INTENTS: EmergencyIntent[] = [
     actions: [
       { label: "Call 911", type: "call", payload: "911" },
       { label: "Call Health Center", type: "call", payload: "0464173693" },
-      { label: "Share Location", type: "location", payload: "" },
+      { label: "Send Current Live Location", type: "location", payload: "Medical emergency" },
     ],
   },
 ];
@@ -215,6 +217,17 @@ function pickIntent<T extends { keywords: string[] }>(text: string, intents: T[]
     .sort((a, b) => b.score - a.score)[0]?.intent;
 }
 
+function locationFromPosition(position: GeolocationPosition) {
+  return {
+    lat: position.coords.latitude,
+    lng: position.coords.longitude,
+    accuracy: position.coords.accuracy,
+    heading: position.coords.heading,
+    speed: position.coords.speed,
+    at: new Date(position.timestamp).toISOString(),
+  };
+}
+
 // Canvas requires a default export named App to render the preview correctly.
 export default function App() {
   return (
@@ -235,7 +248,12 @@ export function Chatbot() {
   const [liveAnnouncements, setLiveAnnouncements] = useState<LiveAnnouncement[]>([]);
   const [liveServices, setLiveServices] = useState<LiveService[]>([]);
   const [liveDepartments, setLiveDepartments] = useState<LiveDepartment[]>([]);
+  const [activeEmergencyAlertId, setActiveEmergencyAlertId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const locationWatchRef = useRef<number | null>(null);
+  const activeEmergencyAlertIdRef = useRef<string | null>(null);
+  const lastLocationPatchAtRef = useRef(0);
+  const lastEmergencySituationRef = useRef("Emergency assistance requested");
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
@@ -254,6 +272,16 @@ export function Chatbot() {
   useEffect(() => {
     if (isOpen) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isOpen]);
+
+  useEffect(() => {
+    activeEmergencyAlertIdRef.current = activeEmergencyAlertId;
+  }, [activeEmergencyAlertId]);
+
+  useEffect(() => () => {
+    if (locationWatchRef.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(locationWatchRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -280,11 +308,12 @@ export function Chatbot() {
     const cleaned = normalize(text);
     const emergency = pickIntent(cleaned, EMERGENCY_INTENTS);
     if (emergency) {
+      lastEmergencySituationRef.current = text;
       return {
         id: Date.now() + 1,
         text: emergency.response,
         isBot: true,
-        actions: emergency.actions,
+        actions: emergency.actions.map((action) => action.type === "location" ? { ...action, payload: text || action.payload } : action),
         isEmergency: true,
       };
     }
@@ -320,6 +349,109 @@ export function Chatbot() {
     }, 450);
   };
 
+  const appendBotMessage = (text: string, actions?: ActionDef[]) => {
+    setMessages((prev) => [...prev, {
+      id: Date.now() + Math.floor(Math.random() * 1000),
+      text,
+      isBot: true,
+      actions,
+      isEmergency: Boolean(actions?.some((action) => action.type === "stop-location")),
+    }]);
+  };
+
+  const getCurrentPosition = () => new Promise<GeolocationPosition>((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      maximumAge: 5000,
+      timeout: 15000,
+    });
+  });
+
+  const startLiveLocationWatch = (alertId: string) => {
+    if (!navigator.geolocation) return;
+    if (locationWatchRef.current !== null) {
+      navigator.geolocation.clearWatch(locationWatchRef.current);
+    }
+    locationWatchRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const now = Date.now();
+        if (now - lastLocationPatchAtRef.current < 5000) return;
+        lastLocationPatchAtRef.current = now;
+        const currentAlertId = activeEmergencyAlertIdRef.current || alertId;
+        void api.patch(`/api/emergency-alerts/${currentAlertId}/location`, {
+          location: locationFromPosition(position),
+        }).catch(() => {
+          // The next successful browser location update will retry automatically.
+        });
+      },
+      () => {
+        appendBotMessage("Hindi ma-update ang live location ngayon. Kung kaya, i-type ang pinakamalapit na landmark.");
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
+    );
+  };
+
+  const sendLiveLocationAlert = async (action: ActionDef) => {
+    const shared: Message = { id: Date.now(), text: "Send current live location.", isBot: false };
+    setMessages((prev) => [...prev, shared]);
+
+    if (!getToken()) {
+      appendBotMessage("Para maipadala ang live location sa barangay dashboard, mag-login muna sa resident account.", [
+        { label: "Go to Login", type: "link", payload: "/login" },
+      ]);
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      appendBotMessage("Location sharing is not available on this device. Please type your exact address or nearest landmark.");
+      return;
+    }
+
+    if (activeEmergencyAlertIdRef.current) {
+      appendBotMessage("Live location sharing is already active. Keep this page open so the dashboard can keep receiving your latest location.", [
+        { label: "Stop Live Location Sharing", type: "stop-location", payload: activeEmergencyAlertIdRef.current },
+      ]);
+      return;
+    }
+
+    try {
+      appendBotMessage("Kukunin ko ang current location mo. Please allow location permission kung lalabas sa browser.");
+      const position = await getCurrentPosition();
+      const situation = action.payload || lastEmergencySituationRef.current || "Emergency assistance requested";
+      const res = await api.post("/api/emergency-alerts", {
+        situation,
+        location: locationFromPosition(position),
+      });
+      const alertId = res.data?._id;
+      if (!alertId) throw new Error("Missing live alert id");
+      setActiveEmergencyAlertId(alertId);
+      activeEmergencyAlertIdRef.current = alertId;
+      startLiveLocationWatch(alertId);
+      appendBotMessage(
+        "Live location is now being shared with barangay staff. Keep this page open if you can, and move to a safe place first.",
+        [{ label: "Stop Live Location Sharing", type: "stop-location", payload: alertId }],
+      );
+    } catch (_err) {
+      appendBotMessage("Hindi naipadala ang live location ngayon. Please allow location permission, then try again, or type your exact address/landmark.");
+    }
+  };
+
+  const stopLiveLocationAlert = async () => {
+    const alertId = activeEmergencyAlertIdRef.current;
+    if (locationWatchRef.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(locationWatchRef.current);
+      locationWatchRef.current = null;
+    }
+    setActiveEmergencyAlertId(null);
+    activeEmergencyAlertIdRef.current = null;
+    if (alertId) {
+      await api.patch(`/api/emergency-alerts/${alertId}/cancel`, {
+        reason: "Live sharing stopped by resident.",
+      }).catch(() => undefined);
+    }
+    appendBotMessage("Live location sharing has stopped. If you are still in danger, call the emergency hotline right away.");
+  };
+
   const handleActionClick = (action: ActionDef) => {
     if (action.type === "call") {
       window.location.href = `tel:${action.payload}`;
@@ -327,35 +459,12 @@ export function Chatbot() {
     }
 
     if (action.type === "location") {
-      const shared: Message = { id: Date.now(), text: "I want to share my current location.", isBot: false };
-      setMessages((prev) => [...prev, shared]);
-      if (!navigator.geolocation) {
-        setMessages((prev) => [...prev, {
-          id: Date.now() + 1,
-          text: "Location sharing is not available on this device. Please type your address or nearest landmark.",
-          isBot: true,
-          isEmergency: true,
-        }]);
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setMessages((prev) => [...prev, {
-            id: Date.now() + 1,
-            text: `Location captured. Latitude: ${position.coords.latitude.toFixed(5)}, Longitude: ${position.coords.longitude.toFixed(5)}. Please also send your nearest landmark so responders can find you faster.`,
-            isBot: true,
-            isEmergency: true,
-          }]);
-        },
-        () => {
-          setMessages((prev) => [...prev, {
-            id: Date.now() + 1,
-            text: "Location permission was not granted. Please type your exact address or nearest landmark.",
-            isBot: true,
-            isEmergency: true,
-          }]);
-        },
-      );
+      void sendLiveLocationAlert(action);
+      return;
+    }
+
+    if (action.type === "stop-location") {
+      void stopLiveLocationAlert();
       return;
     }
 
@@ -432,7 +541,9 @@ export function Chatbot() {
                               ? "bg-red-600 text-white hover:bg-red-700"
                               : action.type === "location"
                                 ? "bg-slate-800 text-white hover:bg-slate-900"
-                                : "bg-[#638ECB] text-white hover:bg-[#4b77b8]",
+                                : action.type === "stop-location"
+                                  ? "bg-red-100 text-red-700 hover:bg-red-200"
+                                  : "bg-[#638ECB] text-white hover:bg-[#4b77b8]",
                           )}
                           type="button"
                         >

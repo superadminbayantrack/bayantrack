@@ -1,14 +1,14 @@
 ﻿
 import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, Pencil, RotateCcw, Search, Settings, Shield, Trash2, UserCog, UserX, Users, X } from "lucide-react";
+import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, MapPin, Pencil, RotateCcw, Search, Settings, Shield, Trash2, UserCog, UserX, Users, X } from "lucide-react";
 import { clearAuthSession, type UserRole } from "@/lib/auth";
 import { api, authHeaders } from "@/lib/api";
 import { LogoutConfirmation } from "@/components/LogoutConfirmation";
 
 interface DashboardProps { role: UserRole; }
-type Panel = "overview" | "users" | "officials" | "announcements" | "reports" | "services" | "messages" | "subscriptions" | "restore" | "settings" | "notifications" | "audit";
-type FilterPanel = "users" | "announcements" | "reports" | "services" | "messages" | "subscriptions" | "audit";
+type Panel = "overview" | "users" | "officials" | "announcements" | "reports" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "restore" | "settings" | "notifications" | "audit";
+type FilterPanel = "users" | "announcements" | "reports" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "audit";
 type TableFilterState = { search: string; date: string; time: string };
 type PermissionFlags = { view: boolean; add: boolean; edit: boolean; archive: boolean; delete: boolean };
 type AdminPermissions = {
@@ -32,6 +32,24 @@ type Department = { _id: string; name: string; contactPerson: string; localNumbe
 type EvacuationCenter = { _id: string; name: string; address: string; active: boolean; capacity?: number; hazardsCovered?: string[]; notes?: string; location: { lat: number; lng: number } };
 type EmergencyHotline = { _id: string; name: string; type: string; number: string; desc?: string; when?: string[]; prepare?: string[]; active?: boolean };
 type Subscription = HandlerInfo & { _id: string; email: string; status: "active" | "unsubscribed"; source?: string; createdAt?: string; };
+type EmergencyAlertItem = HandlerInfo & {
+  _id: string;
+  referenceNo: string;
+  situation: string;
+  status: "active" | "acknowledged" | "resolved" | "cancelled";
+  residentSnapshot?: {
+    userId?: string;
+    username?: string;
+    fullName?: string;
+    email?: string;
+    contactNumber?: string;
+    age?: string;
+    address?: string;
+  };
+  currentLocation?: { lat: number; lng: number; accuracy?: number | null; at?: string };
+  createdAt?: string;
+  updatedAt?: string;
+};
 type ActivityItem = {
   _id: string;
   title: string;
@@ -362,6 +380,21 @@ function formatDateTime(value?: string) {
   });
 }
 
+function googleMapsUrl(location?: EmergencyAlertItem["currentLocation"]) {
+  if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) return "";
+  return `https://www.google.com/maps?q=${location.lat},${location.lng}`;
+}
+
+function formatCoordinates(location?: EmergencyAlertItem["currentLocation"]) {
+  if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) return "No live location yet";
+  return `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`;
+}
+
+function normalizeBrandName(value?: string) {
+  const cleaned = String(value || "BayanTrack").replace(/\s*\+\s*$/g, "").replace(/\s+/g, " ").trim();
+  return cleaned.toLowerCase() === "bayantrack" || !cleaned ? "BayanTrack" : cleaned;
+}
+
 function handlerLabel(item?: HandlerInfo) {
   if (!item?.handledByName) return "Not assigned yet";
   return `${item.handledByName}${item.handledByRole ? ` (${item.handledByRole})` : ""}`;
@@ -405,8 +438,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<Panel>("overview");
-  const [managementNavOpen, setManagementNavOpen] = useState(true);
-  const [systemNavOpen, setSystemNavOpen] = useState(true);
+  const [managementNavOpen, setManagementNavOpen] = useState(false);
+  const [systemNavOpen, setSystemNavOpen] = useState(false);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
@@ -441,6 +474,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [messages, setMessages] = useState<ContactMessage[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [emergencyAlerts, setEmergencyAlerts] = useState<EmergencyAlertItem[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [adminNotifications, setAdminNotifications] = useState<ActivityItem[]>([]);
   const [serviceCatalog, setServiceCatalog] = useState<any[]>([]);
@@ -489,6 +523,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     users: { search: "", date: "", time: "" },
     announcements: { search: "", date: "", time: "" },
     reports: { search: "", date: "", time: "" },
+    emergencyAlerts: { search: "", date: "", time: "" },
     services: { search: "", date: "", time: "" },
     messages: { search: "", date: "", time: "" },
     subscriptions: { search: "", date: "", time: "" },
@@ -510,7 +545,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(defaultSystemSettings);
   const [savedSystemSettings, setSavedSystemSettings] = useState<SystemSettings>(defaultSystemSettings);
   const [siteContent, setSiteContent] = useState<SiteContent>({
-    navbarBrandText: "BAYANTRACK +",
+    navbarBrandText: "BayanTrack",
     heroEyebrow: "Official Government Portal",
     heroTitleLine1: "Mambog II",
     heroTitleLine2: "Progressive & Safe",
@@ -528,7 +563,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     governanceItems: [
       { title: "Barangay Assemblies", description: "Biannual gatherings mandated by law to discuss financial reports and community projects." },
       { title: "Transparency", description: "Open access to barangay budget, ordinances, and resolutions for public review." },
-      { title: "Citizen Reporting", description: "Active channels for feedback, complaints, and emergency reporting via BayanTrack+." },
+      { title: "Citizen Reporting", description: "Active channels for feedback, complaints, and emergency reporting via BayanTrack." },
     ],
     servicesHeroTitle: "Online Services Portal",
     servicesHeroSubtitle: "Certificate of Indigency, Barangay Clearance, and Barangay ID requests with clear request tracking.",
@@ -536,7 +571,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     emergencyHotlinesSubtitle: "Keep these numbers saved. Know what to do before you call.",
     officialsPageTitle: "Barangay Officials Directory",
     officialsPageSubtitle: "Meet the dedicated public servants of Barangay Mambog II, committed to transparency and efficient public service.",
-    footerBrandText: "BayanTrack+",
+    footerBrandText: "BayanTrack",
     footerDescription: "The official digital portal of Barangay Mambog II, Bacoor, Cavite. Bridging the gap between the barangay hall and the home through technology and transparency.",
     footerAddress: "Mambog II Barangay Hall, Bacoor City, Cavite 4102",
     footerPhone: "(046) 472-0110",
@@ -581,9 +616,10 @@ export default function RoleDashboard({ role }: DashboardProps) {
     announcements: announcements.length,
     subscribers: subscriptions.filter((s) => s.status === "active").length,
     openReports: reports.filter((r) => r.status !== "resolved").length,
+    liveAlerts: emergencyAlerts.filter((alert) => alert.status === "active" || alert.status === "acknowledged").length,
     pendingServices: services.filter((s) => s.status === "pending" || s.status === "in-review").length,
     unreadMessages: messages.filter((m) => m.status === "new").length,
-  }), [users, announcements, subscriptions, reports, services, messages]);
+  }), [users, announcements, subscriptions, reports, emergencyAlerts, services, messages]);
 
   const chartServices = useMemo(() => {
     const map = new Map<string, number>();
@@ -698,6 +734,15 @@ export default function RoleDashboard({ role }: DashboardProps) {
       `${report.category} | ${report.status}`,
       [],
     ));
+    emergencyAlerts.forEach((alert) => pushResult(
+      "emergencyAlerts",
+      "Live Alerts",
+      `live-alert-${alert._id}`,
+      alert.referenceNo,
+      alert.situation,
+      [alert.status, alert.residentSnapshot?.username, alert.residentSnapshot?.email].filter(Boolean).join(" | "),
+      [alert.residentSnapshot?.fullName, alert.residentSnapshot?.contactNumber, alert.residentSnapshot?.address],
+    ));
     services.forEach((service) => pushResult(
       service.status === "rejected" ? "restore" : "services",
       "Service Requests",
@@ -745,7 +790,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     ));
 
     return results.sort((a, b) => b.score - a.score || a.module.localeCompare(b.module)).slice(0, 14);
-  }, [normalizedSearch, users, officials, announcements, reports, services, messages, subscriptions, adminNotifications, activities]);
+  }, [normalizedSearch, users, officials, announcements, reports, emergencyAlerts, services, messages, subscriptions, adminNotifications, activities]);
 
   const openDashboardSearchResult = (result: DashboardSearchResult) => {
     if (result.panel === "users") {
@@ -756,6 +801,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     if (result.panel === "officials") setOfficialCategory("all");
     if (result.panel === "announcements") setAnnouncementCategory("all");
     if (result.panel === "reports") setReportCategory("all");
+    if (result.panel === "emergencyAlerts") updateTableFilter("emergencyAlerts", { search: "" });
     if (result.panel === "services") setServiceCategory("all");
     if (result.panel === "messages") setMessageCategory("all");
     if (result.panel === "subscriptions") setSubscriberCategory("all");
@@ -870,6 +916,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     { value: "all", label: "All" },
     { value: "users", label: "Users" },
     { value: "reports", label: "Reports" },
+    { value: "live-alerts", label: "Live Alerts" },
     { value: "services", label: "Services" },
     { value: "messages", label: "Messages" },
     { value: "announcements", label: "Announcements" },
@@ -974,6 +1021,30 @@ export default function RoleDashboard({ role }: DashboardProps) {
       }),
     [reports, reportCategory, normalizedSearch, tableFilters, reportSortOrder],
   );
+  const filteredEmergencyAlerts = useMemo(
+    () => emergencyAlerts
+      .filter((alert) => matchesDashboardSearch(
+        alert.referenceNo,
+        alert.situation,
+        alert.status,
+        alert.residentSnapshot?.username,
+        alert.residentSnapshot?.fullName,
+        alert.residentSnapshot?.email,
+        alert.residentSnapshot?.contactNumber,
+      ) && matchesTableFilters(
+        "emergencyAlerts",
+        alert.createdAt,
+        alert.referenceNo,
+        alert.situation,
+        alert.status,
+        alert.residentSnapshot?.username,
+        alert.residentSnapshot?.fullName,
+        alert.residentSnapshot?.email,
+        alert.residentSnapshot?.contactNumber,
+      ))
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime()),
+    [emergencyAlerts, normalizedSearch, tableFilters],
+  );
   const filteredSubscriptions = useMemo(
     () => subscriptions.filter((s) => s.status !== "unsubscribed" && (subscriberCategory === "all" || s.status === subscriberCategory) && matchesDashboardSearch(s.email, s.source, s.status, s.adminComment, s.handledByName) && matchesTableFilters("subscriptions", s.createdAt, s.email, s.source, s.status, s.adminComment, s.handledByName)),
     [subscriptions, subscriberCategory, normalizedSearch, tableFilters],
@@ -988,6 +1059,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
       const module = String(item.metadata?.module || item.type || "").toLowerCase();
       if (notificationCategory === "users") return module.includes("user") || module.includes("child");
       if (notificationCategory === "reports") return module.includes("report");
+      if (notificationCategory === "live-alerts") return module.includes("emergency-alert") || module.includes("live");
       if (notificationCategory === "services") return module.includes("service");
       if (notificationCategory === "messages") return module.includes("message");
       if (notificationCategory === "announcements") return module.includes("announcement");
@@ -1078,6 +1150,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
         { name: "service requests", request: api.get("/api/services/requests", { headers: authHeaders() }) },
         { name: "messages", request: api.get("/api/contact/messages", { headers: authHeaders() }) },
         { name: "subscribers", request: api.get("/api/subscriptions", { headers: authHeaders() }) },
+        { name: "live alerts", request: api.get("/api/emergency-alerts", { headers: authHeaders() }) },
         { name: "activity", request: api.get("/api/admin/activity", { headers: authHeaders(), params: { date: activityLogDate || todayInputValue() } }) },
         { name: "notifications", request: api.get("/api/admin/notifications", { headers: authHeaders(), params: { date: notificationLogDate || todayInputValue() } }) },
         { name: "system settings", request: api.get("/api/admin/system-settings", { headers: authHeaders() }) },
@@ -1099,17 +1172,25 @@ export default function RoleDashboard({ role }: DashboardProps) {
       setServices(readResult(4, services));
       setMessages(readResult(5, messages));
       setSubscriptions(readResult(6, subscriptions));
-      const activityData = readResult<any>(7, []);
-      const notificationData = readResult<any>(8, { items: [] });
+      setEmergencyAlerts(readResult(7, emergencyAlerts));
+      const activityData = readResult<any>(8, []);
+      const notificationData = readResult<any>(9, { items: [] });
       setActivities(Array.isArray(activityData) ? activityData : activityData?.items || activities);
       setAdminNotifications(notificationData?.items || adminNotifications);
-      const nextSettings = { ...systemSettings, ...(readResult(9, {}) || {}) };
+      const nextSettings = { ...systemSettings, ...(readResult(10, {}) || {}) };
       setSystemSettings(nextSettings);
       setSavedSystemSettings(nextSettings);
-      setSiteContent((p) => ({ ...p, ...(readResult(10, {}) || {}) }));
-      setMyPermissions(normalizeAdminPermissions(readResult<any>(13, {})?.adminPermissions));
-      setServiceCatalog(readResult(11, serviceCatalog));
-      setDepartments(readResult(12, departments));
+      setSiteContent((p) => {
+        const nextContent = { ...p, ...(readResult(11, {}) || {}) };
+        return {
+          ...nextContent,
+          navbarBrandText: normalizeBrandName(nextContent.navbarBrandText),
+          footerBrandText: normalizeBrandName(nextContent.footerBrandText),
+        };
+      });
+      setMyPermissions(normalizeAdminPermissions(readResult<any>(14, {})?.adminPermissions));
+      setServiceCatalog(readResult(12, serviceCatalog));
+      setDepartments(readResult(13, departments));
       if (canManage) {
         const [evacRes, hotlineRes] = await Promise.allSettled([
           api.get("/api/services/evacuation-centers", { headers: authHeaders() }),
@@ -1396,6 +1477,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
         { id: "officials", label: "Officials", icon: <Building2 size={16} /> },
         { id: "announcements", label: "Announcements", icon: <Bell size={16} /> },
         { id: "reports", label: "Reports", icon: <AlertTriangle size={16} /> },
+        { id: "emergencyAlerts", label: "Live Alerts", icon: <MapPin size={16} /> },
         { id: "services", label: "Service Requests", icon: <FileText size={16} /> },
         { id: "messages", label: "Messages", icon: <Mail size={16} /> },
         { id: "subscriptions", label: "Subscribers", icon: <Mail size={16} /> },
@@ -1794,10 +1876,14 @@ export default function RoleDashboard({ role }: DashboardProps) {
           </section>
           {activePanel === "overview" && (
             <section className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
                 <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs text-slate-500">Users</p><p className="text-3xl font-bold">{stats.users}</p></div>
                 <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs text-slate-500">Pending Approval</p><p className="text-3xl font-bold">{stats.pendingUsers}</p></div>
                 <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs text-slate-500">Announcements</p><p className="text-3xl font-bold">{stats.announcements}</p></div>
+                <button className="rounded-xl border border-red-100 bg-red-50 p-5 text-left shadow-sm transition hover:bg-red-100" onClick={() => setActivePanel("emergencyAlerts")} type="button">
+                  <p className="text-xs text-red-700">Live Alerts</p>
+                  <p className="text-3xl font-bold text-red-800">{stats.liveAlerts}</p>
+                </button>
                 <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs text-slate-500">Subscribers</p><p className="text-3xl font-bold">{stats.subscribers}</p></div>
               </div>
               <div className="grid gap-4 xl:grid-cols-2">
@@ -2138,6 +2224,99 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {filteredReports.length === 0 && <p className="mt-2 text-sm text-slate-500">No reports in this category.</p>}
+            </section>
+          )}
+          {activePanel === "emergencyAlerts" && (
+            <section className={card}>
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold">Live Emergency Alerts</h2>
+                  <p className="mt-1 text-sm text-slate-500">Realtime resident location shares from the chatbot during urgent situations.</p>
+                </div>
+                <div className="rounded-full border border-red-100 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700">
+                  {stats.liveAlerts} active
+                </div>
+              </div>
+              <PanelSearchFilters value={tableFilters.emergencyAlerts} onChange={(next) => updateTableFilter("emergencyAlerts", next)} placeholder="Search live alerts..." />
+              <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">Alert</th>
+                      <th className="px-4 py-3 font-semibold">Resident</th>
+                      <th className="px-4 py-3 font-semibold">Current Location</th>
+                      <th className="px-4 py-3 font-semibold">Status</th>
+                      <th className="px-4 py-3 font-semibold">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredEmergencyAlerts.map((alert) => {
+                      const resident = alert.residentSnapshot || {};
+                      const mapUrl = googleMapsUrl(alert.currentLocation);
+                      return (
+                        <tr key={alert._id} className="border-t border-slate-200 align-top">
+                          <td className="px-4 py-3 text-slate-700">
+                            <div className="min-w-[260px] space-y-2">
+                              <p className="font-semibold text-slate-900">{alert.referenceNo}</p>
+                              <p className="text-sm font-medium text-red-700">{alert.situation}</p>
+                              <p className="text-xs text-slate-500">Started: {formatDateTime(alert.createdAt)}</p>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <div className="min-w-[260px] rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-xs leading-5">
+                              <p className="text-sm font-bold text-slate-900">{resident.fullName || "Resident"}</p>
+                              <p><span className="font-semibold text-slate-500">Username:</span> {resident.username || "N/A"}</p>
+                              <p><span className="font-semibold text-slate-500">ID:</span> {resident.userId || "N/A"}</p>
+                              <p><span className="font-semibold text-slate-500">Age:</span> {resident.age || "Not recorded"}</p>
+                              <p><span className="font-semibold text-slate-500">Email:</span> {resident.email || "N/A"}</p>
+                              <p><span className="font-semibold text-slate-500">Number:</span> {resident.contactNumber || "N/A"}</p>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <div className="min-w-[240px] space-y-2">
+                              <div className="rounded-xl border border-blue-100 bg-blue-50 p-3">
+                                <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-500">Latest coordinates</p>
+                                <p className="mt-1 font-mono text-sm font-semibold text-blue-950">{formatCoordinates(alert.currentLocation)}</p>
+                                <p className="mt-1 text-xs text-blue-900/70">Updated: {formatDateTime(alert.currentLocation?.at || alert.updatedAt)}</p>
+                                {alert.currentLocation?.accuracy ? <p className="mt-1 text-xs text-blue-900/70">Accuracy: approx. {Math.round(alert.currentLocation.accuracy)}m</p> : null}
+                              </div>
+                              {mapUrl ? (
+                                <a className={btnSecondary} href={mapUrl} target="_blank" rel="noopener noreferrer">
+                                  <MapPin size={14} className="mr-1" /> Open Google Maps
+                                </a>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3"><Badge value={alert.status} /></td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              {alert.status === "active" ? (
+                                <button
+                                  className={btnSecondary}
+                                  onClick={() => setPendingAction({ title: "Acknowledge Live Alert", message: `Mark ${alert.referenceNo} as acknowledged?`, confirmLabel: "Acknowledge", run: () => runActionWithFeedback("Live alert acknowledged", () => api.patch(`/api/emergency-alerts/${alert._id}/status`, { status: "acknowledged" }, { headers: authHeaders() })) })}
+                                  type="button"
+                                >
+                                  Acknowledge
+                                </button>
+                              ) : null}
+                              {alert.status !== "resolved" && alert.status !== "cancelled" ? (
+                                <button
+                                  className={btnPrimary}
+                                  onClick={() => setPendingAction({ title: "Resolve Live Alert", message: `Mark ${alert.referenceNo} as resolved?`, confirmLabel: "Resolve", run: () => runActionWithFeedback("Live alert resolved", () => api.patch(`/api/emergency-alerts/${alert._id}/status`, { status: "resolved" }, { headers: authHeaders() })) })}
+                                  type="button"
+                                >
+                                  Resolve
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {filteredEmergencyAlerts.length === 0 && <p className="mt-2 text-sm text-slate-500">No live alerts found.</p>}
             </section>
           )}
           {activePanel === "services" && (

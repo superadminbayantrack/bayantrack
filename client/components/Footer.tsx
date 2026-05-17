@@ -2,6 +2,12 @@ import { Link } from "react-router-dom";
 import { Facebook, MapPin, Phone, Mail } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import brandLogo from "../../assets/brandlogo/brand_logo.png";
+
+function normalizeBrandText(value?: string) {
+  const cleaned = String(value || "BayanTrack").replace(/\s*\+\s*$/g, "").replace(/\s+/g, " ").trim();
+  return cleaned.toLowerCase() === "bayantrack" || !cleaned ? "BayanTrack" : cleaned;
+}
 
 export function Footer() {
   const [content, setContent] = useState<any>(null);
@@ -25,11 +31,9 @@ export function Footer() {
           {/* Brand Column */}
           <div className="flex flex-col">
             <div className="flex items-center gap-3 mb-8">
-              <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-lg">
-                B
-              </div>
+              <img src={brandLogo} alt="BayanTrack logo" className="h-10 w-10 rounded-full object-contain" />
               <span className="font-extrabold text-2xl tracking-tight">
-                {content?.footerBrandText || "BayanTrack+"}
+                {normalizeBrandText(content?.footerBrandText)}
               </span>
             </div>
             <p className="text-white/60 text-sm leading-relaxed mb-10 max-w-xs">

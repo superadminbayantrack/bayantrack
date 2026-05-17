@@ -5,6 +5,7 @@ import { Eye, EyeOff, User, Lock, ArrowRight, ArrowLeft, Mail, Phone, Upload, X,
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { clearAuthSession, getRoleHome, normalizeRole, setAuthSession } from "@/lib/auth";
 import { api } from "@/lib/api";
+import brandLogo from "../../../assets/brandlogo/brand_logo.png";
 
 type ViewState = "login" | "forgot" | "create" | "reset";
 type LiveUpdate = { category: string; text: string; module?: string };
@@ -424,9 +425,9 @@ const Login = () => {
 
       <div className="relative z-10 mb-3 w-full max-w-[520px] lg:hidden">
         <div className="flex items-center justify-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#1e293b] text-sm font-bold text-white">BT</div>
+          <img src={brandLogo} alt="BayanTrack logo" className="h-9 w-9 rounded-lg object-contain" />
           <div>
-            <h1 className="text-lg font-extrabold tracking-tight text-slate-900" >BAYANTRACK +</h1>
+            <h1 className="text-lg font-extrabold tracking-tight text-slate-900" >BayanTrack</h1>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Mambog II, Bacoor</p>
           </div>
         </div>
@@ -437,11 +438,9 @@ const Login = () => {
         {/* LEFT SIDE: Branding (Hidden on mobile) */}
         <motion.div layout transition={{ type: "spring", stiffness: 100, damping: 20 }} className="hidden flex-1 flex-col gap-6 lg:flex sticky top-20">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#1e293b] text-white font-bold text-xl">
-              BT
-            </div>
+            <img src={brandLogo} alt="BayanTrack logo" className="h-12 w-12 rounded-lg object-contain" />
             <div>
-              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">BAYANTRACK +</h1>
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">BayanTrack</h1>
               <p className="text-xs font-semibold text-slate-500 tracking-widest uppercase">Mambog II, Bacoor</p>
             </div>
           </div>

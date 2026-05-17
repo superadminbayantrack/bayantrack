@@ -27,7 +27,7 @@ const GovernanceItemSchema = new mongoose.Schema(
 
 const SiteContentSchema = new mongoose.Schema(
   {
-    navbarBrandText: { type: String, default: 'BAYANTRACK +' },
+    navbarBrandText: { type: String, default: 'BayanTrack' },
     heroEyebrow: { type: String, default: 'Official Government Portal' },
     heroTitleLine1: { type: String, default: 'Mambog II' },
     heroTitleLine2: { type: String, default: 'Progressive & Safe' },
@@ -83,7 +83,7 @@ const SiteContentSchema = new mongoose.Schema(
       default: [
         { title: 'Barangay Assemblies', description: 'Biannual gatherings mandated by law to discuss financial reports and community projects.' },
         { title: 'Transparency', description: 'Open access to barangay budget, ordinances, and resolutions for public review.' },
-        { title: 'Citizen Reporting', description: 'Active channels for feedback, complaints, and emergency reporting via BayanTrack+.' },
+        { title: 'Citizen Reporting', description: 'Active channels for feedback, complaints, and emergency reporting via BayanTrack.' },
       ],
     },
     servicesHeroTitle: { type: String, default: 'Online Services Portal' },
@@ -92,7 +92,7 @@ const SiteContentSchema = new mongoose.Schema(
     emergencyHotlinesSubtitle: { type: String, default: 'Keep these numbers saved. Know what to do before you call.' },
     officialsPageTitle: { type: String, default: 'Barangay Officials Directory' },
     officialsPageSubtitle: { type: String, default: 'Meet the dedicated public servants of Barangay Mambog II, committed to transparency and efficient public service.' },
-    footerBrandText: { type: String, default: 'BayanTrack+' },
+    footerBrandText: { type: String, default: 'BayanTrack' },
     footerDescription: { type: String, default: 'The official digital portal of Barangay Mambog II, Bacoor, Cavite. Bridging the gap between the barangay hall and the home through technology and transparency.' },
     footerAddress: { type: String, default: 'Mambog II Barangay Hall, Bacoor City, Cavite 4102' },
     footerPhone: { type: String, default: '(046) 472-0110' },

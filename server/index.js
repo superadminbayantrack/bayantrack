@@ -14,6 +14,7 @@ import adminRoutes from './routes/admin.js';
 import officialsRoutes from './routes/officials.js';
 import subscriptionsRoutes from './routes/subscriptions.js';
 import contentRoutes from './routes/content.js';
+import emergencyAlertRoutes from './routes/emergencyAlerts.js';
 import User from './models/User.js';
 import Department from './models/Department.js';
 import Announcement from './models/Announcement.js';
@@ -305,7 +306,7 @@ async function isAdminRequest(req) {
 }
 
 async function enforceMaintenanceMode(req, res, next) {
-  if (req.path === '/ping' || req.path.startsWith('/admin') || req.path === '/auth/login') {
+  if (req.path === '/ping' || req.path.startsWith('/admin') || req.path === '/auth/login' || req.path.startsWith('/emergency-alerts')) {
     return next();
   }
 
@@ -425,6 +426,7 @@ export function createServer() {
   app.use('/api/officials', officialsRoutes);
   app.use('/api/subscriptions', subscriptionsRoutes);
   app.use('/api/content', contentRoutes);
+  app.use('/api/emergency-alerts', emergencyAlertRoutes);
 
   app.get('/api/demo', (_req, res) => {
     res.status(200).json({ message: 'Hello from Express server' });

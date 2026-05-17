@@ -37,7 +37,7 @@ export function GovernanceSection() {
     {
       icon: MessageSquare,
       title: "Citizen Reporting",
-      description: "Active channels for feedback, complaints, and emergency reporting via BayanTrack+.",
+      description: "Active channels for feedback, complaints, and emergency reporting via BayanTrack.",
     },
   ];
   const [content, setContent] = useState<any>(null);

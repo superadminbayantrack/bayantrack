@@ -7,6 +7,7 @@ import { User, ChevronDown, Menu, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { clearAuthSession, getToken } from "@/lib/auth";
 import { api } from "@/lib/api";
+import brandLogo from "../../assets/brandlogo/brand_logo.png";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +15,11 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+
+function normalizeBrandText(value?: string) {
+  const cleaned = String(value || "BayanTrack").replace(/\s*\+\s*$/g, "").replace(/\s+/g, " ").trim();
+  return cleaned.toLowerCase() === "bayantrack" || !cleaned ? "BayanTrack" : cleaned;
+}
 
 export function Header() {
   const location = useLocation();
@@ -24,7 +30,7 @@ export function Header() {
   const [isLoggingOut, setIsLoggingOut] = React.useState(false);
   const [notifications, setNotifications] = React.useState<any[]>([]);
   const [isAnnouncementsMenuOpen, setIsAnnouncementsMenuOpen] = React.useState(false);
-  const [brandText, setBrandText] = React.useState("BAYANTRACK +");
+  const [brandText, setBrandText] = React.useState("BayanTrack");
 
   React.useEffect(() => {
     const fetchUser = async () => {
@@ -67,9 +73,9 @@ export function Header() {
     const fetchBrand = async () => {
       try {
         const res = await api.get("/api/content/site");
-        setBrandText(res.data?.navbarBrandText || "BAYANTRACK +");
+        setBrandText(normalizeBrandText(res.data?.navbarBrandText));
       } catch {
-        setBrandText("BAYANTRACK +");
+        setBrandText("BayanTrack");
       }
     };
     void fetchBrand();
@@ -117,9 +123,7 @@ export function Header() {
 
         {/* Logo */}
         <Link to="/home" className="flex shrink-0 items-center gap-2 sm:gap-3">
-          <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-white font-bold text-xl border-4 border-primary/20">
-            BT
-          </div>
+          <img src={brandLogo} alt="BayanTrack logo" className="h-12 w-12 rounded-full object-contain" />
           <div className="hidden sm:block">
             <span className="font-extrabold text-primary text-lg">
               {brandText}
