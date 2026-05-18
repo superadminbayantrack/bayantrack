@@ -1,15 +1,16 @@
 ﻿
-import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type MouseEvent as ReactMouseEvent, type ReactNode, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, MapPin, MessageCircle, Paperclip, Pencil, RotateCcw, Search, Settings, Star, Trash2, UserCog, UserX, Users, X } from "lucide-react";
 import { clearAuthSession, type UserRole } from "@/lib/auth";
 import { api, authHeaders } from "@/lib/api";
 import { LogoutConfirmation } from "@/components/LogoutConfirmation";
-import dashboardLogo from "../../../assets/brandlogo/brand_logo.png";
+import dashboardLogo from "../../../assets/brandlogo/Brand_Logo_ADMINDASBOARD.png";
 
 interface DashboardProps { role: UserRole; }
 type Panel = "overview" | "users" | "officials" | "announcements" | "reports" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "restore" | "settings" | "notifications" | "audit";
 type FilterPanel = "users" | "announcements" | "reports" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "audit";
+type MonthlyDetailKind = "users" | "services" | "reports" | "messages";
 type TableFilterState = { search: string; date: string; time: string };
 type PermissionFlags = { view: boolean; add: boolean; edit: boolean; archive: boolean; delete: boolean };
 type AdminPermissions = {
@@ -407,6 +408,31 @@ function formatDateTime(value?: string) {
   });
 }
 
+function formatDateOnly(value?: string) {
+  if (!value) return "No date";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No date";
+  return date.toLocaleDateString([], { year: "numeric", month: "short", day: "2-digit" });
+}
+
+function formatTimeOnly(value?: string) {
+  if (!value) return "No time";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No time";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function monthKeyFromDate(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${date.getMonth()}`;
+}
+
+function userDisplayName(user?: Partial<UserItem>) {
+  return [user?.firstName, user?.middleName, user?.lastName].filter(Boolean).join(" ").trim() || user?.username || user?.email || "Unnamed user";
+}
+
 function googleMapsUrl(location?: EmergencyAlertItem["currentLocation"]) {
   if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) return "";
   return `https://www.google.com/maps?q=${location.lat},${location.lng}`;
@@ -548,7 +574,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [reportCategory, setReportCategory] = useState("all");
   const [liveAlertCategory, setLiveAlertCategory] = useState<"unresolved" | "resolved" | "all">("unresolved");
   const [notificationCategory, setNotificationCategory] = useState("all");
-  const [clearedNotificationIds, setClearedNotificationIds] = useState<string[]>([]);
+  const [monthlyDetailModal, setMonthlyDetailModal] = useState<MonthlyDetailKind | null>(null);
   const [restoreCategory, setRestoreCategory] = useState("users");
   const [reportSortOrder, setReportSortOrder] = useState<"newest" | "oldest">("newest");
   const [serviceSortOrder, setServiceSortOrder] = useState<"newest" | "oldest">("newest");
@@ -720,10 +746,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
 
   const recentActivityDetails = useMemo(() => activities.slice(0, 5), [activities]);
 
-  const visibleAdminNotifications = useMemo(
-    () => adminNotifications.filter((item) => !clearedNotificationIds.includes(String(item._id))),
-    [adminNotifications, clearedNotificationIds],
-  );
+  const visibleAdminNotifications = adminNotifications;
   const recentAdminNotices = useMemo(() => visibleAdminNotifications.slice(0, 6), [visibleAdminNotifications]);
   const normalizedSearch = normalizeSearch(searchQuery);
   const normalizedRestoreSearch = normalizeSearch(restoreSearch);
@@ -920,6 +943,56 @@ export default function RoleDashboard({ role }: DashboardProps) {
     messages.forEach((item) => stamp(item.createdAt, "messages"));
     return counts;
   }, [users, reports, services, messages]);
+
+  const monthlySeries = useMemo(() => ([
+    { key: "users" as const, label: "Registered Accounts", color: "bg-blue-600", accent: "text-blue-700", border: "border-blue-100", soft: "bg-blue-50" },
+    { key: "services" as const, label: "Service Requests", color: "bg-emerald-600", accent: "text-emerald-700", border: "border-emerald-100", soft: "bg-emerald-50" },
+    { key: "reports" as const, label: "Reports", color: "bg-amber-500", accent: "text-amber-700", border: "border-amber-100", soft: "bg-amber-50" },
+    { key: "messages" as const, label: "Messages", color: "bg-fuchsia-600", accent: "text-fuchsia-700", border: "border-fuchsia-100", soft: "bg-fuchsia-50" },
+  ]), []);
+
+  const monthlyWindowKeys = useMemo(() => new Set(monthlyOverview.map((row) => row.key)), [monthlyOverview]);
+
+  const monthlyDetailRows = useMemo(() => {
+    const inWindow = (createdAt?: string) => monthlyWindowKeys.has(monthKeyFromDate(createdAt));
+    return {
+      users: users
+        .filter((item) => inWindow(item.createdAt))
+        .map((item) => ({
+          id: item._id,
+          createdAt: item.createdAt,
+          cells: [userDisplayName(item), item.email || "N/A", item.gender || "N/A", item.role || "resident", item.status || "pending"],
+        })),
+      services: services
+        .filter((item) => inWindow(item.createdAt))
+        .map((item) => ({
+          id: item._id,
+          createdAt: item.createdAt,
+          cells: [item.referenceNo, item.fullName || "N/A", item.serviceType || "N/A", item.status || "pending"],
+        })),
+      reports: reports
+        .filter((item) => inWindow(item.createdAt))
+        .map((item) => ({
+          id: item._id,
+          createdAt: item.createdAt,
+          cells: [item.referenceNo, item.fullName || "N/A", item.category || "N/A", item.status || "new"],
+        })),
+      messages: messages
+        .filter((item) => inWindow(item.createdAt))
+        .map((item) => ({
+          id: item._id,
+          createdAt: item.createdAt,
+          cells: [item.referenceNo, item.name || "N/A", item.department || "N/A", item.status || "new"],
+        })),
+    };
+  }, [monthlyWindowKeys, users, services, reports, messages]);
+
+  const monthlyDetailColumns: Record<MonthlyDetailKind, string[]> = {
+    users: ["Name", "Email", "Gender", "Role", "Status"],
+    services: ["Reference", "Resident", "Service", "Status"],
+    reports: ["Reference", "Reporter", "Category", "Status"],
+    messages: ["Reference", "Sender", "Department", "Status"],
+  };
 
   const statusDonutData = useMemo(() => ([
     { label: "Active Users", value: users.filter((item) => item.status === "active").length, color: "#0f766e" },
@@ -1151,7 +1224,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     [activities, activityRoleCategory, normalizedSearch, tableFilters],
   );
   const filteredAdminNotifications = useMemo(
-    () => adminNotifications.filter((item) => !clearedNotificationIds.includes(String(item._id))).filter((item) => {
+    () => adminNotifications.filter((item) => {
       if (notificationCategory === "all") return true;
       const module = String(item.metadata?.module || item.type || "").toLowerCase();
       if (notificationCategory === "users") return module.includes("user") || module.includes("child");
@@ -1163,7 +1236,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
       if (notificationCategory === "child-access") return module.includes("child");
       return true;
     }).filter((item) => matchesDashboardSearch(item.title, item.type, item.userRole, item.referenceNo, item.metadata?.module) && matchesLocalSearch(normalizedNotificationSearch, item.title, item.type, item.userName, item.userRole, item.referenceNo, item.metadata?.module)),
-    [adminNotifications, clearedNotificationIds, notificationCategory, normalizedSearch, normalizedNotificationSearch],
+    [adminNotifications, notificationCategory, normalizedSearch, normalizedNotificationSearch],
   );
   const archivedUsers = useMemo(() => users.filter((u) => u.status === "suspended" && matchesDashboardSearch(u.username, u.firstName, u.middleName, u.lastName, u.email, u.contactNumber, u.address, u.role) && matchesLocalSearch(normalizedRestoreSearch, u.username, u.firstName, u.middleName, u.lastName, u.email, u.contactNumber, u.address, u.role)), [users, normalizedSearch, normalizedRestoreSearch]);
   const archivedOfficials = useMemo(() => officials.filter((o) => o.active === false && matchesDashboardSearch(o.name, o.role, o.committee, o.description, o.level) && matchesLocalSearch(normalizedRestoreSearch, o.name, o.role, o.committee, o.description, o.level)), [officials, normalizedSearch, normalizedRestoreSearch]);
@@ -1476,6 +1549,19 @@ export default function RoleDashboard({ role }: DashboardProps) {
       () => api.patch(`/api/emergency-alerts/${alert._id}/end-chat`, { message: note }, { headers: authHeaders() }),
     );
     setLiveAlertChatModal((current) => current?._id === alert._id ? { ...current, status: "resolved", chatEndedAt: new Date().toISOString() } : current);
+  }
+
+  async function clearAdminNotifications(event?: ReactMouseEvent<HTMLButtonElement>) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    try {
+      await api.patch("/api/admin/notifications/clear", {}, { headers: authHeaders() });
+      setAdminNotifications([]);
+      setShowAdminNotifications(false);
+      setFeedback({ type: "success", title: "Notifications cleared", message: "Cleared notifications will stay hidden after refresh." });
+    } catch (err: any) {
+      setFeedback({ type: "error", title: "Clear failed", message: err?.response?.data?.msg || "Could not clear notifications right now." });
+    }
   }
 
   async function runActionWithFeedback(title: string, action: () => Promise<void>) {
@@ -1842,7 +1928,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               onMouseEnter={() => setShowAdminNotifications(true)}
               onMouseLeave={() => setShowAdminNotifications(false)}
             >
-              <button className="relative inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50" type="button" aria-label="Notifications" onClick={() => setActivePanel("notifications")}>
+              <button className="relative inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50" type="button" aria-label="Notifications" onClick={() => setShowAdminNotifications((value) => !value)}>
                 <Bell size={16} />
                 {recentAdminNotices.length > 0 ? (
                   <>
@@ -1855,7 +1941,10 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 <div className="absolute right-0 top-12 z-30 w-[320px] rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-900">Notifications</p>
-                    <button className="text-[11px] font-semibold text-slate-500 hover:text-slate-900" onClick={() => setClearedNotificationIds(adminNotifications.map((item) => String(item._id)))} type="button">Clear all</button>
+                    <div className="flex items-center gap-2">
+                      <button className="text-[11px] font-semibold text-slate-500 hover:text-slate-900" onClick={() => { setActivePanel("notifications"); setShowAdminNotifications(false); }} type="button">View all</button>
+                      <button className="text-[11px] font-semibold text-slate-500 hover:text-slate-900" onClick={(event) => void clearAdminNotifications(event)} type="button">Clear all</button>
+                    </div>
                   </div>
                   <div className="space-y-2">
                     {recentAdminNotices.length === 0 ? (
@@ -2119,16 +2208,14 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   <span className="text-xs text-slate-500">Last 6 months</span>
                 </div>
                 <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  {[
-                    { key: "users", label: "Registered Accounts", color: "bg-blue-600" },
-                    { key: "services", label: "Service Requests", color: "bg-emerald-600" },
-                    { key: "reports", label: "Reports", color: "bg-amber-500" },
-                    { key: "messages", label: "Messages", color: "bg-fuchsia-600" },
-                  ].map((series) => {
+                  {monthlySeries.map((series) => {
                     const max = Math.max(1, ...monthlyOverview.map((row) => Number(row[series.key as keyof typeof row] || 0)));
                     return (
-                      <div key={series.key} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-sm font-semibold text-slate-900">{series.label}</p>
+                      <div key={series.key} className={`rounded-2xl border ${series.border} bg-slate-50 p-4`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-slate-900">{series.label}</p>
+                          <button className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 transition hover:bg-slate-100" onClick={() => setMonthlyDetailModal(series.key)} type="button">View</button>
+                        </div>
                         <div className="mt-4 flex h-36 items-end gap-2">
                           {monthlyOverview.map((row) => {
                             const value = Number(row[series.key as keyof typeof row] || 0);
@@ -3091,7 +3178,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{visibleAdminNotifications.length} updates</div>
-                  <button className={btnSecondary} onClick={() => setClearedNotificationIds(adminNotifications.map((item) => String(item._id)))} type="button">Clear All</button>
+                  <button className={btnSecondary} onClick={(event) => void clearAdminNotifications(event)} type="button">Clear All</button>
                 </div>
               </div>
               <div className="mb-4 flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3 lg:flex-row lg:items-center">
@@ -4402,6 +4489,64 @@ export default function RoleDashboard({ role }: DashboardProps) {
           </div>
         </div>
       )}
+
+      {monthlyDetailModal && (() => {
+        const series = monthlySeries.find((item) => item.key === monthlyDetailModal) || monthlySeries[0];
+        const rows = [...monthlyDetailRows[monthlyDetailModal]].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        const columns = monthlyDetailColumns[monthlyDetailModal];
+        const max = Math.max(1, ...monthlyOverview.map((row) => Number(row[monthlyDetailModal] || 0)));
+        return (
+          <div className={modalOverlay}>
+            <div className={`${modalCard} max-w-6xl`}>
+              <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className={`text-xs font-bold uppercase tracking-[0.2em] ${series.accent}`}>Last 6 months</p>
+                  <h3 className="mt-1 text-xl font-bold text-slate-900">{series.label}</h3>
+                  <p className="mt-1 text-sm text-slate-500">Monthly graph details with the matching records below.</p>
+                </div>
+                <button className={iconBtn} onClick={() => setMonthlyDetailModal(null)} type="button" title="Close details" aria-label="Close details"><X size={18} /></button>
+              </div>
+              <div className={`rounded-2xl border ${series.border} ${series.soft} p-4`}>
+                <div className="flex h-52 items-end gap-3">
+                  {monthlyOverview.map((row) => {
+                    const value = Number(row[monthlyDetailModal] || 0);
+                    return (
+                      <div key={`${monthlyDetailModal}-modal-${row.key}`} className="flex flex-1 flex-col items-center gap-2">
+                        <div className="flex h-40 w-full items-end rounded-xl bg-white/70 px-2 pt-2">
+                          <div className={`w-full rounded-t-lg ${series.color} shadow-sm transition-all duration-300 ease-out`} style={{ height: `${Math.max(8, Math.round((value / max) * 100))}%` }} />
+                        </div>
+                        <span className="text-xs font-bold text-slate-600">{row.label}</span>
+                        <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-900">{value}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">Date</th>
+                      <th className="px-4 py-3 font-semibold">Time</th>
+                      {columns.map((column) => <th key={column} className="px-4 py-3 font-semibold">{column}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={row.id} className="border-t border-slate-200 align-top">
+                        <td className="px-4 py-3 text-xs font-semibold text-slate-600">{formatDateOnly(row.createdAt)}</td>
+                        <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatTimeOnly(row.createdAt)}</td>
+                        {row.cells.map((cell, index) => <td key={`${row.id}-${index}`} className="px-4 py-3 text-slate-700">{cell}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {rows.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">No matching records in the last 6 months.</p> : null}
+            </div>
+          </div>
+        );
+      })()}
 
       {feedback && <div className="fixed right-2 top-20 z-50 sm:right-4 sm:top-24"><div className={`rounded-lg border px-4 py-3 text-sm shadow-lg ${feedback.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}><p className="font-semibold">{feedback.title}</p><p>{feedback.message}</p></div></div>}
       {pendingAction && <div className={modalOverlay}><div className={`${modalCard} max-w-lg`}><h3 className="text-lg font-bold text-slate-900">{pendingAction.title}</h3><p className="mt-2 text-sm text-slate-600">{pendingAction.message}</p><div className="mt-6 flex gap-3"><button className={`${btnSecondary} flex-1 text-sm`} onClick={() => setPendingAction(null)} disabled={actionLoading} type="button">Cancel</button><button className={`${btnPrimary} flex-1 text-sm`} onClick={confirmPendingAction} disabled={actionLoading} type="button">{pendingAction.confirmLabel}</button></div></div></div>}

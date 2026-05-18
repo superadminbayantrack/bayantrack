@@ -12,6 +12,7 @@ import ContactMessage from '../models/ContactMessage.js';
 import Announcement from '../models/Announcement.js';
 import Subscription from '../models/Subscription.js';
 import SystemSetting from '../models/SystemSetting.js';
+import NotificationState from '../models/NotificationState.js';
 import { auth, requireRoles } from '../middleware/auth.js';
 import { logSystemEvent, sendUserMail } from '../utils/notifications.js';
 import { isReservedEmbeddedIdentity } from '../config/embeddedAccounts.js';
@@ -69,6 +70,10 @@ function serializeActivityLog(a) {
 function activityActorQuery(userId) {
   const id = String(userId || '');
   return mongoose.Types.ObjectId.isValid(id) ? { user: id } : { 'metadata.actorId': id };
+}
+
+function notificationActorKey(userPayload = {}) {
+  return String(userPayload?.id || userPayload?.role || 'system').trim() || 'system';
 }
 
 async function persistDailyActivitySnapshot(dateKey, rows) {
@@ -714,7 +719,14 @@ router.get('/activity', auth, requireRoles('admin', 'superadmin'), async (req, r
 router.get('/notifications', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
   try {
     const { dateKey, start, end } = resolveDailyActivityRange(req.query.date);
-    const activities = await ActivityLog.find({ createdAt: { $gte: start, $lt: end } })
+    const state = await NotificationState.findOne({ actorId: notificationActorKey(req.user) }).lean();
+    const createdAt = { $gte: start, $lt: end };
+    if (state?.clearedAt && state.clearedAt > start) {
+      createdAt.$gt = state.clearedAt;
+      delete createdAt.$gte;
+    }
+
+    const activities = await ActivityLog.find({ createdAt })
       .sort({ createdAt: -1 })
       .limit(200)
       .populate('user', 'username firstName middleName lastName email contactNumber address role')
@@ -726,6 +738,22 @@ router.get('/notifications', auth, requireRoles('admin', 'superadmin'), async (r
     return res.json({ date: dateKey, count: items.length, items });
   } catch (_err) {
     return res.status(500).json({ msg: 'Failed to fetch notifications' });
+  }
+});
+
+router.patch('/notifications/clear', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
+  try {
+    const actorId = notificationActorKey(req.user);
+    const clearedAt = new Date();
+    const state = await NotificationState.findOneAndUpdate(
+      { actorId },
+      { actorId, clearedAt },
+      { new: true, upsert: true },
+    ).lean();
+
+    return res.json({ msg: 'Notifications cleared', clearedAt: state.clearedAt });
+  } catch (_err) {
+    return res.status(500).json({ msg: 'Failed to clear notifications' });
   }
 });
 

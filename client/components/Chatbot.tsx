@@ -583,7 +583,11 @@ export function Chatbot() {
       setLiveEmergencyRatedAt(res.data?.alert?.residentRatedAt || new Date().toISOString());
       setLiveEmergencyRatingComment(res.data?.alert?.residentRatingComment || ratingComment);
       setRatingComment("");
-      appendBotMessage("Salamat sa feedback. Na-save ito sa live alert record para mareview ng barangay staff.");
+      appendBotMessage("Salamat sa feedback. Na-save ito sa live alert record para mareview ng barangay staff.\n\nIs there anything else I can help you with?", [
+        { label: "Services", type: "link", payload: "/services" },
+        { label: "Report Issue", type: "link", payload: "/ReportIssue" },
+        { label: "Contact Barangay", type: "link", payload: "/contact" },
+      ]);
     } catch (_err) {
       appendBotMessage("Hindi na-save ang rating ngayon. Please try again later.");
     } finally {
