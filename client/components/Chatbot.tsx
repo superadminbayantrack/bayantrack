@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ArrowRight, Maximize2, MessageCircle, Minimize2, Send, Sparkles, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Maximize2, MessageCircle, Minimize2, Paperclip, Send, Sparkles, Star, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 
@@ -44,11 +44,13 @@ type LiveKnowledge = {
 };
 type LiveChatMessage = {
   _id?: string;
-  senderRole: "resident" | "admin" | "superadmin" | "staff";
+  senderRole: "resident" | "admin" | "superadmin" | "staff" | "system";
   senderName: string;
   message: string;
+  attachments?: ChatAttachment[];
   createdAt: string;
 };
+type ChatAttachment = { name: string; type: string; size: number; dataUrl: string };
 type LiveTypingState = {
   resident?: { isTyping?: boolean; name?: string; role?: string; at?: string } | null;
   staff?: { isTyping?: boolean; name?: string; role?: string; at?: string } | null;
@@ -264,13 +266,20 @@ export function Chatbot() {
   const [liveEmergencyChatMessages, setLiveEmergencyChatMessages] = useState<LiveChatMessage[]>([]);
   const [liveEmergencyTyping, setLiveEmergencyTyping] = useState<LiveTypingState>({});
   const [liveEmergencyStatus, setLiveEmergencyStatus] = useState("");
+  const [liveEmergencyRatedAt, setLiveEmergencyRatedAt] = useState("");
+  const [liveEmergencyRatingComment, setLiveEmergencyRatingComment] = useState("");
   const [liveChatInput, setLiveChatInput] = useState("");
+  const [liveChatAttachments, setLiveChatAttachments] = useState<ChatAttachment[]>([]);
   const [liveChatSending, setLiveChatSending] = useState(false);
+  const [ratingComment, setRatingComment] = useState("");
+  const [ratingSending, setRatingSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const liveChatEndRef = useRef<HTMLDivElement>(null);
+  const liveChatFileInputRef = useRef<HTMLInputElement | null>(null);
   const locationWatchRef = useRef<number | null>(null);
   const activeEmergencyAlertIdRef = useRef<string | null>(null);
   const liveChatTypingTimerRef = useRef<number | null>(null);
+  const liveChatEndedNoticeRef = useRef<string | null>(null);
   const lastLocationPatchAtRef = useRef(0);
   const lastEmergencySituationRef = useRef("Emergency assistance requested");
   const [messages, setMessages] = useState<Message[]>([
@@ -331,7 +340,7 @@ export function Chatbot() {
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || !liveEmergencyChatOpen || !activeEmergencyAlertId) return;
+    if (!isOpen || !activeEmergencyAlertId) return;
     let cancelled = false;
     const loadLiveChat = async () => {
       try {
@@ -340,6 +349,8 @@ export function Chatbot() {
         setLiveEmergencyChatMessages(Array.isArray(res.data?.messages) ? res.data.messages : []);
         setLiveEmergencyTyping(res.data?.typing || {});
         setLiveEmergencyStatus(res.data?.alert?.status || "");
+        setLiveEmergencyRatedAt(res.data?.alert?.residentRatedAt || "");
+        setLiveEmergencyRatingComment(res.data?.alert?.residentRatingComment || "");
       } catch {
         if (!cancelled) setLiveEmergencyTyping({});
       }
@@ -351,7 +362,16 @@ export function Chatbot() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [isOpen, liveEmergencyChatOpen, activeEmergencyAlertId]);
+  }, [isOpen, activeEmergencyAlertId]);
+
+  useEffect(() => {
+    if (!activeEmergencyAlertId || liveEmergencyStatus !== "resolved") return;
+    if (liveChatEndedNoticeRef.current === activeEmergencyAlertId) return;
+    liveChatEndedNoticeRef.current = activeEmergencyAlertId;
+    appendBotMessage("The live chat was ended by barangay staff. Please rate the help you received so the barangay can review the response.", [
+      { label: "Open Rating", type: "open-live-chat", payload: activeEmergencyAlertId },
+    ]);
+  }, [activeEmergencyAlertId, liveEmergencyStatus]);
 
   const processMessage = (text: string): Message => {
     const cleaned = normalize(text);
@@ -416,6 +436,32 @@ export function Chatbot() {
     });
   });
 
+  const fileToDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+
+  const addLiveChatFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const next: ChatAttachment[] = [];
+    for (const file of Array.from(files).slice(0, 3)) {
+      if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+        appendBotMessage("Image at video files lang muna ang pwedeng i-attach sa live chat.");
+        continue;
+      }
+      if (file.size > 4 * 1024 * 1024) {
+        appendBotMessage(`${file.name} is too large. Please attach a file under 4MB para mas mabilis ma-save.`);
+        continue;
+      }
+      const dataUrl = await fileToDataUrl(file);
+      next.push({ name: file.name, type: file.type, size: file.size, dataUrl });
+    }
+    setLiveChatAttachments((prev) => [...prev, ...next].slice(0, 3));
+    if (liveChatFileInputRef.current) liveChatFileInputRef.current.value = "";
+  };
+
   const startLiveLocationWatch = (alertId: string) => {
     if (!navigator.geolocation) return;
     if (locationWatchRef.current !== null) {
@@ -458,7 +504,7 @@ export function Chatbot() {
 
     if (activeEmergencyAlertIdRef.current) {
       appendBotMessage("Live location sharing is already active. Keep this page open so the dashboard can keep receiving your latest location.", [
-        { label: "Open Live Chat", type: "open-live-chat", payload: activeEmergencyAlertIdRef.current },
+        { label: "Contact Barangay Help", type: "open-live-chat", payload: activeEmergencyAlertIdRef.current },
         { label: "Stop Live Location Sharing", type: "stop-location", payload: activeEmergencyAlertIdRef.current },
       ]);
       return;
@@ -478,13 +524,13 @@ export function Chatbot() {
       activeEmergencyAlertIdRef.current = alertId;
       startLiveLocationWatch(alertId);
       appendBotMessage(
-        "Live location is now being shared with barangay staff. Keep this page open if you can, and move to a safe place first.",
+        "Live location is now being shared with barangay staff. Do you want to contact barangay help through live chat? Use it only for this real situation so responders can focus on actual emergencies.",
         [
-          { label: "Open Live Chat", type: "open-live-chat", payload: alertId },
+          { label: "Contact Barangay Help", type: "open-live-chat", payload: alertId },
           { label: "Stop Live Location Sharing", type: "stop-location", payload: alertId },
         ],
       );
-      setLiveEmergencyChatOpen(true);
+      setLiveEmergencyChatOpen(false);
     } catch (_err) {
       appendBotMessage("Hindi naipadala ang live location ngayon. Please allow location permission, then try again, or type your exact address/landmark.");
     }
@@ -507,19 +553,41 @@ export function Chatbot() {
   const sendLiveChatMessage = async () => {
     const alertId = activeEmergencyAlertIdRef.current;
     const message = liveChatInput.trim();
-    if (!alertId || !message || liveChatSending) return;
+    if (!alertId || (!message && liveChatAttachments.length === 0) || liveChatSending) return;
     setLiveChatSending(true);
     try {
-      const res = await api.post(`/api/emergency-alerts/${alertId}/messages`, { message });
+      const res = await api.post(`/api/emergency-alerts/${alertId}/messages`, { message, attachments: liveChatAttachments });
       setLiveEmergencyChatMessages(Array.isArray(res.data?.messages) ? res.data.messages : []);
       setLiveEmergencyTyping(res.data?.typing || {});
       setLiveEmergencyStatus(res.data?.alert?.status || liveEmergencyStatus);
       setLiveChatInput("");
+      setLiveChatAttachments([]);
       markLiveChatTyping(false);
     } catch (_err) {
       appendBotMessage("Hindi na-send ang live chat message ngayon. Please try again or call the hotline kung urgent.");
     } finally {
       setLiveChatSending(false);
+    }
+  };
+
+  const submitLiveChatRating = async (rating: number) => {
+    const alertId = activeEmergencyAlertIdRef.current;
+    if (!alertId || ratingSending) return;
+    setRatingSending(true);
+    try {
+      const res = await api.patch(`/api/emergency-alerts/${alertId}/rating`, {
+        rating,
+        comment: ratingComment,
+      });
+      setLiveEmergencyChatMessages(Array.isArray(res.data?.messages) ? res.data.messages : []);
+      setLiveEmergencyRatedAt(res.data?.alert?.residentRatedAt || new Date().toISOString());
+      setLiveEmergencyRatingComment(res.data?.alert?.residentRatingComment || ratingComment);
+      setRatingComment("");
+      appendBotMessage("Salamat sa feedback. Na-save ito sa live alert record para mareview ng barangay staff.");
+    } catch (_err) {
+      appendBotMessage("Hindi na-save ang rating ngayon. Please try again later.");
+    } finally {
+      setRatingSending(false);
     }
   };
 
@@ -533,6 +601,7 @@ export function Chatbot() {
     activeEmergencyAlertIdRef.current = null;
     setLiveEmergencyChatOpen(false);
     setLiveEmergencyStatus("cancelled");
+    setLiveChatAttachments([]);
     if (alertId) {
       await api.patch(`/api/emergency-alerts/${alertId}/cancel`, {
         reason: "Live sharing stopped by resident.",
@@ -686,14 +755,37 @@ export function Chatbot() {
                     <p className="text-xs text-slate-500">Wala pang chat message. I-type ang update mo para makita ng barangay staff.</p>
                   ) : liveEmergencyChatMessages.map((item, index) => {
                     const fromResident = item.senderRole === "resident";
+                    const fromSystem = item.senderRole === "system";
                     return (
-                      <div key={item._id || `${item.createdAt}-${index}`} className={`flex ${fromResident ? "justify-end" : "justify-start"}`}>
+                      <div key={item._id || `${item.createdAt}-${index}`} className={`flex ${fromSystem ? "justify-center" : fromResident ? "justify-end" : "justify-start"}`}>
                         <div className={cn(
                           "max-w-[82%] rounded-2xl px-3 py-2 text-xs leading-5 shadow-sm",
-                          fromResident ? "rounded-br-sm bg-[#3b528a] text-white" : "rounded-bl-sm border border-emerald-100 bg-white text-slate-700",
+                          fromSystem
+                            ? "border border-amber-100 bg-amber-50 text-amber-900"
+                            : fromResident ? "rounded-br-sm bg-[#3b528a] text-white" : "rounded-bl-sm border border-emerald-100 bg-white text-slate-700",
                         )}>
-                          <p className={fromResident ? "text-white/75" : "text-emerald-700"}>{fromResident ? "You" : item.senderName || "Barangay staff"}</p>
-                          <p className="mt-0.5 whitespace-pre-wrap">{item.message}</p>
+                          <p className={fromSystem ? "text-amber-700" : fromResident ? "text-white/75" : "text-emerald-700"}>{fromSystem ? "System" : fromResident ? "You" : item.senderName || "Barangay staff"}</p>
+                          {item.message ? <p className="mt-0.5 whitespace-pre-wrap">{item.message}</p> : null}
+                          {item.attachments?.length ? (
+                            <div className="mt-2 space-y-2">
+                              {item.attachments.map((attachment, attachmentIndex) => (
+                                <a
+                                  key={`${attachment.name}-${attachmentIndex}`}
+                                  className={cn("block overflow-hidden rounded-xl border text-left", fromResident ? "border-white/20 bg-white/10" : "border-slate-200 bg-slate-50")}
+                                  href={attachment.dataUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {attachment.type.startsWith("image/") ? (
+                                    <img src={attachment.dataUrl} alt={attachment.name || "Attachment"} className="max-h-36 w-full object-cover" />
+                                  ) : (
+                                    <video src={attachment.dataUrl} className="max-h-36 w-full" controls />
+                                  )}
+                                  <span className="block truncate px-2 py-1 text-[10px] font-semibold">{attachment.name || "Attachment"}</span>
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -716,9 +808,25 @@ export function Chatbot() {
                     placeholder="Update mo ang staff dito..."
                     className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-medium outline-none focus:border-emerald-400 focus:bg-white"
                   />
+                  <input
+                    ref={liveChatFileInputRef}
+                    type="file"
+                    accept="image/*,video/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => void addLiveChatFiles(e.target.files)}
+                  />
+                  <button
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    onClick={() => liveChatFileInputRef.current?.click()}
+                    type="button"
+                    aria-label="Attach image or video"
+                  >
+                    <Paperclip size={16} />
+                  </button>
                   <button
                     className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white disabled:cursor-not-allowed disabled:opacity-50"
-                    disabled={!liveChatInput.trim() || liveChatSending}
+                    disabled={(!liveChatInput.trim() && liveChatAttachments.length === 0) || liveChatSending || liveEmergencyStatus === "resolved"}
                     onClick={() => void sendLiveChatMessage()}
                     type="button"
                     aria-label="Send live chat message"
@@ -726,6 +834,48 @@ export function Chatbot() {
                     <Send size={16} />
                   </button>
                 </div>
+                {liveChatAttachments.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {liveChatAttachments.map((attachment, index) => (
+                      <button
+                        key={`${attachment.name}-${index}`}
+                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-600 hover:bg-red-50 hover:text-red-700"
+                        onClick={() => setLiveChatAttachments((prev) => prev.filter((_, i) => i !== index))}
+                        type="button"
+                      >
+                        {attachment.name} x
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {liveEmergencyStatus === "resolved" && !liveEmergencyRatedAt ? (
+                  <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 p-3">
+                    <p className="text-xs font-bold text-amber-900">Are you satisfied with the help?</p>
+                    <textarea
+                      value={ratingComment}
+                      onChange={(e) => setRatingComment(e.target.value)}
+                      placeholder="Optional comment..."
+                      className="mt-2 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none focus:border-amber-400"
+                      rows={2}
+                    />
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {[1, 2, 3, 4, 5].map((rating) => (
+                        <button
+                          key={rating}
+                          className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1.5 text-xs font-bold text-amber-700 shadow-sm hover:bg-amber-100"
+                          onClick={() => void submitLiveChatRating(rating)}
+                          disabled={ratingSending}
+                          type="button"
+                        >
+                          <Star size={13} fill="currentColor" /> {rating}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {liveEmergencyRatedAt ? (
+                  <p className="mt-2 text-xs font-semibold text-emerald-700">Feedback saved{liveEmergencyRatingComment ? `: ${liveEmergencyRatingComment}` : "."}</p>
+                ) : null}
               </div>
             ) : null}
             <div ref={messagesEndRef} />

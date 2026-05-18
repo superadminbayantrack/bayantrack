@@ -114,7 +114,8 @@ Main System Modules:
 13. Live Emergency Alert Module
    - Residents can send a live emergency alert from the chatbot during urgent situations such as fire, flood, theft, medical emergencies, or safety threats.
    - The alert sends the resident account details, current situation, latest location, and location update history to the admin and superadmin dashboards.
-   - Barangay staff can acknowledge or resolve the alert and open the latest location in Google Maps.
+   - Barangay staff can acknowledge or resolve the alert, open the latest location in Google Maps, and start a live chat with the resident.
+   - Live chat history, image/video attachments, staff end-chat notes, and resident satisfaction rating are kept as evidence for the specific alert.
 
 Main Database Entities / Tables:
 1. USER
@@ -230,6 +231,25 @@ Main Database Entities / Tables:
    - Important fields: latitude, longitude, accuracy, heading, speed, recorded_at
    - Logical table based on embedded EmergencyAlert.locationHistory[] records.
 
+21. EMERGENCY_CHAT_MESSAGE
+   - PK: chat_message_id
+   - FK: emergency_alert_id -> EMERGENCY_ALERT.emergency_alert_id
+   - Important fields: sender_user_id, sender_role, sender_name, message, created_at
+   - Stores the live conversation between the resident and barangay staff.
+
+22. EMERGENCY_CHAT_ATTACHMENT
+   - PK: chat_attachment_id
+   - FK: chat_message_id -> EMERGENCY_CHAT_MESSAGE.chat_message_id
+   - Important fields: file_name, file_type, file_size, file_data_or_url
+   - Stores image or video evidence attached to live chat messages.
+
+23. EMERGENCY_HELP_RATING
+   - PK: rating_id
+   - FK: emergency_alert_id -> EMERGENCY_ALERT.emergency_alert_id
+   - FK: user_id -> USER.user_id
+   - Important fields: rating_value, rating_comment, rated_at
+   - Stores resident feedback after barangay staff ends or resolves the live chat.
+
 Main Relationships and Cardinality:
 1. USER 1 to many CHILD_ACCESS
    - One parent user can have zero or many linked child access records.
@@ -293,6 +313,18 @@ Main Relationships and Cardinality:
 17. EMERGENCY_ALERT 1 to many EMERGENCY_LOCATION_HISTORY
    - One live alert can have many location updates while the resident is sharing location.
    - Each location update belongs to exactly one emergency alert.
+
+18. EMERGENCY_ALERT 1 to many EMERGENCY_CHAT_MESSAGE
+   - One live alert can have many chat messages.
+   - Each chat message belongs to exactly one live alert.
+
+19. EMERGENCY_CHAT_MESSAGE 1 to many EMERGENCY_CHAT_ATTACHMENT
+   - One chat message can have zero or many image/video attachments.
+   - Each attachment belongs to exactly one chat message.
+
+20. EMERGENCY_ALERT 0/1 to 1 EMERGENCY_HELP_RATING
+   - A resolved live alert may have one resident rating.
+   - The rating is optional because the resident may choose not to submit feedback.
 
 No many-to-many junction table is required in the current scope. If the system later allows multiple staff members to handle one report/request/message, add a STAFF_ASSIGNMENT table.
 

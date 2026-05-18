@@ -25,16 +25,27 @@ const ResidentSnapshotSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const AlertAttachmentSchema = new mongoose.Schema(
+  {
+    name: { type: String, default: '' },
+    type: { type: String, default: '' },
+    size: { type: Number, default: 0 },
+    dataUrl: { type: String, default: '' },
+  },
+  { _id: false },
+);
+
 const AlertChatMessageSchema = new mongoose.Schema(
   {
     senderUser: { type: String, default: '' },
     senderRole: {
       type: String,
-      enum: ['resident', 'admin', 'superadmin', 'staff'],
+      enum: ['resident', 'admin', 'superadmin', 'staff', 'system'],
       default: 'resident',
     },
     senderName: { type: String, default: 'Resident' },
-    message: { type: String, required: true },
+    message: { type: String, default: '' },
+    attachments: { type: [AlertAttachmentSchema], default: [] },
     createdAt: { type: Date, default: Date.now },
   },
   { _id: true },
@@ -70,6 +81,12 @@ const EmergencyAlertSchema = new mongoose.Schema(
     },
     adminComment: { type: String, default: '' },
     archived: { type: Boolean, default: false },
+    chatEndedAt: { type: Date, default: null },
+    chatEndedByName: { type: String, default: '' },
+    chatEndedByRole: { type: String, default: '' },
+    residentRating: { type: Number, min: 1, max: 5, default: null },
+    residentRatingComment: { type: String, default: '' },
+    residentRatedAt: { type: Date, default: null },
     handledByUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     handledByName: { type: String, default: '' },
     handledByRole: { type: String, default: '' },

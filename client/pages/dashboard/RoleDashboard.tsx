@@ -1,10 +1,11 @@
 ﻿
 import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, MapPin, MessageCircle, Pencil, RotateCcw, Search, Settings, Shield, Trash2, UserCog, UserX, Users, X } from "lucide-react";
+import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, MapPin, MessageCircle, Paperclip, Pencil, RotateCcw, Search, Settings, Star, Trash2, UserCog, UserX, Users, X } from "lucide-react";
 import { clearAuthSession, type UserRole } from "@/lib/auth";
 import { api, authHeaders } from "@/lib/api";
 import { LogoutConfirmation } from "@/components/LogoutConfirmation";
+import dashboardLogo from "../../../assets/brandlogo/brand_logo.png";
 
 interface DashboardProps { role: UserRole; }
 type Panel = "overview" | "users" | "officials" | "announcements" | "reports" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "restore" | "settings" | "notifications" | "audit";
@@ -34,11 +35,13 @@ type EmergencyHotline = { _id: string; name: string; type: string; number: strin
 type Subscription = HandlerInfo & { _id: string; email: string; status: "active" | "unsubscribed"; source?: string; createdAt?: string; };
 type AlertChatMessage = {
   _id?: string;
-  senderRole: "resident" | "admin" | "superadmin" | "staff";
+  senderRole: "resident" | "admin" | "superadmin" | "staff" | "system";
   senderName: string;
   message: string;
+  attachments?: ChatAttachment[];
   createdAt: string;
 };
+type ChatAttachment = { name: string; type: string; size: number; dataUrl: string };
 type AlertTypingState = {
   resident?: { isTyping?: boolean; name?: string; role?: string; at?: string } | null;
   staff?: { isTyping?: boolean; name?: string; role?: string; at?: string } | null;
@@ -51,6 +54,12 @@ type EmergencyAlertItem = HandlerInfo & {
   archived?: boolean;
   chatMessages?: AlertChatMessage[];
   typing?: AlertTypingState;
+  chatEndedAt?: string | null;
+  chatEndedByName?: string;
+  chatEndedByRole?: string;
+  residentRating?: number | null;
+  residentRatingComment?: string;
+  residentRatedAt?: string | null;
   residentSnapshot?: {
     userId?: string;
     username?: string;
@@ -72,6 +81,10 @@ type ActivityItem = {
   referenceNo?: string;
   userId?: string;
   userName?: string;
+  userFullName?: string;
+  userContact?: string;
+  userEmail?: string;
+  userAddress?: string;
   userRole?: string;
   metadata?: { module?: string; action?: string; [key: string]: any };
 };
@@ -507,9 +520,11 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [liveAlertChatMessages, setLiveAlertChatMessages] = useState<AlertChatMessage[]>([]);
   const [liveAlertChatTyping, setLiveAlertChatTyping] = useState<AlertTypingState>({});
   const [liveAlertChatText, setLiveAlertChatText] = useState("");
+  const [liveAlertChatAttachments, setLiveAlertChatAttachments] = useState<ChatAttachment[]>([]);
   const [liveAlertChatSending, setLiveAlertChatSending] = useState(false);
   const liveAlertChatEndRef = useRef<HTMLDivElement | null>(null);
   const liveAlertTypingTimerRef = useRef<number | null>(null);
+  const liveAlertFileInputRef = useRef<HTMLInputElement | null>(null);
   const [serviceManageModal, setServiceManageModal] = useState<ServiceRequest | null>(null);
   const [messageManageModal, setMessageManageModal] = useState<ContactMessage | null>(null);
   const [subscriptionManageModal, setSubscriptionManageModal] = useState<Subscription | null>(null);
@@ -533,6 +548,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [reportCategory, setReportCategory] = useState("all");
   const [liveAlertCategory, setLiveAlertCategory] = useState<"unresolved" | "resolved" | "all">("unresolved");
   const [notificationCategory, setNotificationCategory] = useState("all");
+  const [clearedNotificationIds, setClearedNotificationIds] = useState<string[]>([]);
   const [restoreCategory, setRestoreCategory] = useState("users");
   const [reportSortOrder, setReportSortOrder] = useState<"newest" | "oldest">("newest");
   const [serviceSortOrder, setServiceSortOrder] = useState<"newest" | "oldest">("newest");
@@ -692,7 +708,23 @@ export default function RoleDashboard({ role }: DashboardProps) {
     return Array.from(map.entries()).map(([label, value]) => ({ label, value }));
   }, [announcements]);
 
-  const recentAdminNotices = useMemo(() => adminNotifications.slice(0, 6), [adminNotifications]);
+  const alertRatingSummary = useMemo(() => {
+    const rated = emergencyAlerts.filter((alert) => Number(alert.residentRating) > 0);
+    const total = rated.reduce((sum, alert) => sum + Number(alert.residentRating || 0), 0);
+    return {
+      count: rated.length,
+      average: rated.length ? total / rated.length : 0,
+      comments: rated.filter((alert) => alert.residentRatingComment).slice(0, 3),
+    };
+  }, [emergencyAlerts]);
+
+  const recentActivityDetails = useMemo(() => activities.slice(0, 5), [activities]);
+
+  const visibleAdminNotifications = useMemo(
+    () => adminNotifications.filter((item) => !clearedNotificationIds.includes(String(item._id))),
+    [adminNotifications, clearedNotificationIds],
+  );
+  const recentAdminNotices = useMemo(() => visibleAdminNotifications.slice(0, 6), [visibleAdminNotifications]);
   const normalizedSearch = normalizeSearch(searchQuery);
   const normalizedRestoreSearch = normalizeSearch(restoreSearch);
   const normalizedNotificationSearch = normalizeSearch(notificationSearch);
@@ -900,7 +932,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
     { label: "Reports", value: reports.length, color: "#7c3aed" },
     { label: "Messages", value: messages.length, color: "#0891b2" },
     { label: "Subscribers", value: subscriptions.length, color: "#16a34a" },
-  ]), [services, reports, messages, subscriptions]);
+    { label: "Live Alerts", value: emergencyAlerts.length, color: "#dc2626" },
+  ]), [services, reports, messages, subscriptions, emergencyAlerts]);
 
   const announcementCategoryOptions = [
     { value: "all", label: "All" },
@@ -1118,7 +1151,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     [activities, activityRoleCategory, normalizedSearch, tableFilters],
   );
   const filteredAdminNotifications = useMemo(
-    () => adminNotifications.filter((item) => {
+    () => adminNotifications.filter((item) => !clearedNotificationIds.includes(String(item._id))).filter((item) => {
       if (notificationCategory === "all") return true;
       const module = String(item.metadata?.module || item.type || "").toLowerCase();
       if (notificationCategory === "users") return module.includes("user") || module.includes("child");
@@ -1130,7 +1163,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
       if (notificationCategory === "child-access") return module.includes("child");
       return true;
     }).filter((item) => matchesDashboardSearch(item.title, item.type, item.userRole, item.referenceNo, item.metadata?.module) && matchesLocalSearch(normalizedNotificationSearch, item.title, item.type, item.userName, item.userRole, item.referenceNo, item.metadata?.module)),
-    [adminNotifications, notificationCategory, normalizedSearch, normalizedNotificationSearch],
+    [adminNotifications, clearedNotificationIds, notificationCategory, normalizedSearch, normalizedNotificationSearch],
   );
   const archivedUsers = useMemo(() => users.filter((u) => u.status === "suspended" && matchesDashboardSearch(u.username, u.firstName, u.middleName, u.lastName, u.email, u.contactNumber, u.address, u.role) && matchesLocalSearch(normalizedRestoreSearch, u.username, u.firstName, u.middleName, u.lastName, u.email, u.contactNumber, u.address, u.role)), [users, normalizedSearch, normalizedRestoreSearch]);
   const archivedOfficials = useMemo(() => officials.filter((o) => o.active === false && matchesDashboardSearch(o.name, o.role, o.committee, o.description, o.level) && matchesLocalSearch(normalizedRestoreSearch, o.name, o.role, o.committee, o.description, o.level)), [officials, normalizedSearch, normalizedRestoreSearch]);
@@ -1363,6 +1396,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   async function openLiveAlertChat(alert: EmergencyAlertItem) {
     setLiveAlertChatModal(alert);
     setLiveAlertChatText("");
+    setLiveAlertChatAttachments([]);
     try {
       const res = await api.get(`/api/emergency-alerts/${alert._id}/messages`, { headers: authHeaders() });
       setLiveAlertChatMessages(Array.isArray(res.data?.messages) ? res.data.messages : []);
@@ -1374,6 +1408,32 @@ export default function RoleDashboard({ role }: DashboardProps) {
       setLiveAlertChatMessages([]);
       setLiveAlertChatTyping({});
     }
+  }
+
+  const fileToDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+
+  async function addLiveAlertChatFiles(files: FileList | null) {
+    if (!files?.length) return;
+    const next: ChatAttachment[] = [];
+    for (const file of Array.from(files).slice(0, 3)) {
+      if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+        setFeedback({ type: "error", title: "Invalid attachment", message: "Only image and video files can be attached to live chat." });
+        continue;
+      }
+      if (file.size > 4 * 1024 * 1024) {
+        setFeedback({ type: "error", title: "Attachment too large", message: `${file.name} must be under 4MB.` });
+        continue;
+      }
+      const dataUrl = await fileToDataUrl(file);
+      next.push({ name: file.name, type: file.type, size: file.size, dataUrl });
+    }
+    setLiveAlertChatAttachments((prev) => [...prev, ...next].slice(0, 3));
+    if (liveAlertFileInputRef.current) liveAlertFileInputRef.current.value = "";
   }
 
   function markLiveAlertChatTyping(isTyping: boolean) {
@@ -1393,19 +1453,29 @@ export default function RoleDashboard({ role }: DashboardProps) {
   async function sendLiveAlertChatMessage() {
     const alertId = liveAlertChatModal?._id;
     const message = liveAlertChatText.trim();
-    if (!alertId || !message || liveAlertChatSending) return;
+    if (!alertId || (!message && liveAlertChatAttachments.length === 0) || liveAlertChatSending) return;
     setLiveAlertChatSending(true);
     try {
-      const res = await api.post(`/api/emergency-alerts/${alertId}/messages`, { message }, { headers: authHeaders() });
+      const res = await api.post(`/api/emergency-alerts/${alertId}/messages`, { message, attachments: liveAlertChatAttachments }, { headers: authHeaders() });
       setLiveAlertChatMessages(Array.isArray(res.data?.messages) ? res.data.messages : []);
       setLiveAlertChatTyping(res.data?.typing || {});
       setLiveAlertChatText("");
+      setLiveAlertChatAttachments([]);
       markLiveAlertChatTyping(false);
     } catch (err: any) {
       setFeedback({ type: "error", title: "Message failed", message: err?.response?.data?.msg || "Could not send the live chat message." });
     } finally {
       setLiveAlertChatSending(false);
     }
+  }
+
+  async function endLiveAlertChat(alert: EmergencyAlertItem) {
+    const note = `The live chat was ended by ${role === "superadmin" ? "the superadmin" : "barangay staff"}. Please rate the help you received.`;
+    await runActionWithFeedback(
+      "Live chat ended",
+      () => api.patch(`/api/emergency-alerts/${alert._id}/end-chat`, { message: note }, { headers: authHeaders() }),
+    );
+    setLiveAlertChatModal((current) => current?._id === alert._id ? { ...current, status: "resolved", chatEndedAt: new Date().toISOString() } : current);
   }
 
   async function runActionWithFeedback(title: string, action: () => Promise<void>) {
@@ -1702,7 +1772,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
       <div className={`sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur transition-[margin] duration-200 ${isSidebarCollapsed ? "md:ml-20" : "md:ml-[280px]"}`}>
         <div className="flex w-full items-center gap-3 px-4 py-4 sm:px-6">
           <button className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-900 text-white md:hidden" onClick={() => setIsMenuOpen((v) => !v)} type="button" aria-label="Toggle sidebar">
-            {role === "superadmin" ? <Shield size={16} /> : <UserCog size={16} />}
+            <img src={dashboardLogo} alt="BayanTrack" className="h-7 w-7 rounded-full object-cover" />
           </button>
           <div className="min-w-0 flex-1">
             <p className="text-xs uppercase tracking-[0.28em] text-slate-400">BayanTrack Admin Panel</p>
@@ -1785,7 +1855,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 <div className="absolute right-0 top-12 z-30 w-[320px] rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-900">Notifications</p>
-                    <span className="text-[11px] text-slate-500">{recentAdminNotices.length} updates</span>
+                    <button className="text-[11px] font-semibold text-slate-500 hover:text-slate-900" onClick={() => setClearedNotificationIds(adminNotifications.map((item) => String(item._id)))} type="button">Clear all</button>
                   </div>
                   <div className="space-y-2">
                     {recentAdminNotices.length === 0 ? (
@@ -1841,12 +1911,12 @@ export default function RoleDashboard({ role }: DashboardProps) {
               aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm">
-                {role === "superadmin" ? <Shield size={18} /> : <UserCog size={18} />}
+              <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl bg-slate-900 text-white shadow-sm">
+                <img src={dashboardLogo} alt="BayanTrack" className="h-full w-full object-cover" />
               </div>
               {!isSidebarCollapsed ? (
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-900">Superadmin Dashboard</p>
+                  <p className="truncate text-sm font-bold text-slate-900">{role === "superadmin" ? "Superadmin Dashboard" : "Admin Dashboard"}</p>
                   <p className="truncate text-xs text-slate-500">BayanTrack Admin Panel</p>
                 </div>
               ) : null}
@@ -1875,7 +1945,14 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 <div key={item.label} className="space-y-1">
                   <button
                     className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition-all duration-300 ease-out ${activeGroup ? "bg-slate-100 text-slate-900" : "text-slate-700 hover:bg-slate-100"}`}
-                    onClick={() => item.setOpen(!item.open)}
+                    onClick={() => {
+                      if (isSidebarCollapsed) {
+                        setIsSidebarCollapsed(false);
+                        item.setOpen(true);
+                        return;
+                      }
+                      item.setOpen(!item.open);
+                    }}
                     type="button"
                     title={item.label}
                     aria-label={item.label}
@@ -1884,26 +1961,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     {!isSidebarCollapsed ? <span className="min-w-0 flex-1 truncate text-left">{item.label}</span> : null}
                     {!isSidebarCollapsed ? <ChevronDown size={15} className={`transition-transform duration-300 ease-out ${item.open ? "rotate-180" : ""}`} /> : null}
                   </button>
-                  {isSidebarCollapsed ? (
-                    <div className="space-y-1">
-                      {item.children.map((child) => {
-                        const active = activePanel === child.id;
-                        return (
-                          <button
-                            key={child.id}
-                            className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition ${active ? "bg-slate-900 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100"}`}
-                            onClick={() => { setActivePanel(child.id); setIsMenuOpen(false); }}
-                            type="button"
-                            title={child.label}
-                            aria-label={child.label}
-                          >
-                            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10">{child.icon}</span>
-                            {!isSidebarCollapsed ? <span className="min-w-0 truncate">{child.label}</span> : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
+                  {isSidebarCollapsed ? null : (
                     <div className={`grid transition-all duration-300 ease-out ${item.open ? "grid-rows-[1fr] opacity-100 translate-y-0" : "grid-rows-[0fr] -translate-y-1 opacity-0"}`}>
                       <div className="overflow-hidden">
                         <div className="ml-5 space-y-1 border-l border-slate-200 pl-3">
@@ -2001,6 +2059,59 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <div className="grid gap-4 xl:grid-cols-2">
                 <DonutStat title="Account Status Distribution" data={statusDonutData} />
                 <DonutStat title="System Workload Mix" data={requestDonutData} />
+              </div>
+              <div className="grid gap-4 xl:grid-cols-[1fr,1.4fr]">
+                <section className={card}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold text-slate-900">Live Chat Help Rating</h3>
+                      <p className="mt-1 text-xs text-slate-500">Resident feedback after resolved live emergency chats.</p>
+                    </div>
+                    <div className="rounded-2xl bg-amber-50 px-4 py-3 text-right">
+                      <p className="text-xs font-semibold text-amber-700">Average</p>
+                      <p className="text-2xl font-bold text-amber-900">{alertRatingSummary.count ? alertRatingSummary.average.toFixed(1) : "0.0"}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex items-center gap-1 text-amber-500">
+                    {[1, 2, 3, 4, 5].map((star) => <Star key={star} size={18} fill={star <= Math.round(alertRatingSummary.average) ? "currentColor" : "none"} />)}
+                    <span className="ml-2 text-xs font-semibold text-slate-500">{alertRatingSummary.count} rated alert{alertRatingSummary.count === 1 ? "" : "s"}</span>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    {alertRatingSummary.comments.length === 0 ? <p className="text-xs text-slate-500">No rating comments yet.</p> : alertRatingSummary.comments.map((alert) => (
+                      <div key={alert._id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                        <p className="font-bold text-slate-900">{alert.referenceNo} - {alert.residentRating}/5</p>
+                        <p className="mt-1 text-slate-600">{alert.residentRatingComment}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+                <section className={card}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold text-slate-900">Recent System Activity</h3>
+                      <p className="mt-1 text-xs text-slate-500">Latest actions with available contact details.</p>
+                    </div>
+                    <button className={btnSecondary} onClick={() => setActivePanel("audit")} type="button">View All</button>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {recentActivityDetails.length === 0 ? <p className="text-sm text-slate-500">No recent activity for this date.</p> : recentActivityDetails.map((item) => (
+                      <div key={item._id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-bold text-slate-900">{item.userFullName || item.userName || "System"} <span className="font-semibold text-slate-500">({item.userRole || "system"})</span></p>
+                            <p className="mt-1 text-xs text-slate-600">{item.title}</p>
+                          </div>
+                          <span className="text-[11px] text-slate-500">{formatDateTime(item.createdAt)}</span>
+                        </div>
+                        <div className="mt-2 grid gap-1 text-[11px] text-slate-500 sm:grid-cols-3">
+                          <p className="truncate">Contact: {item.userContact || "N/A"}</p>
+                          <p className="truncate">Email: {item.userEmail || "N/A"}</p>
+                          <p className="truncate">Address: {item.userAddress || "N/A"}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
               </div>
               <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-center justify-between">
@@ -2427,7 +2538,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                                       title: "Resolve Live Alert",
                                       message: `Mark ${alert.referenceNo} as resolved?`,
                                       confirmLabel: "Resolve",
-                                      run: () => runActionWithFeedback("Live alert resolved", () => api.patch(`/api/emergency-alerts/${alert._id}/status`, { status: "resolved" }, { headers: authHeaders() })),
+                                      run: () => endLiveAlertChat(alert),
                                     })}
                                   />
                                   Resolved
@@ -2452,7 +2563,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                               {alert.status !== "resolved" && alert.status !== "cancelled" ? (
                                 <button
                                   className={btnPrimary}
-                                  onClick={() => setPendingAction({ title: "Resolve Live Alert", message: `Mark ${alert.referenceNo} as resolved?`, confirmLabel: "Resolve", run: () => runActionWithFeedback("Live alert resolved", () => api.patch(`/api/emergency-alerts/${alert._id}/status`, { status: "resolved" }, { headers: authHeaders() })) })}
+                                  onClick={() => setPendingAction({ title: "End Live Chat", message: `Mark ${alert.referenceNo} as resolved and end the live chat?`, confirmLabel: "End Chat", run: () => endLiveAlertChat(alert) })}
                                   type="button"
                                 >
                                   Resolve
@@ -2978,7 +3089,10 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   <h2 className="text-lg font-semibold">System Notifications</h2>
                   <p className="mt-1 text-sm text-slate-500">Live system events from recent staff and resident actions. This view refreshes automatically every few seconds.</p>
                 </div>
-                <div className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{adminNotifications.length} updates</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">{visibleAdminNotifications.length} updates</div>
+                  <button className={btnSecondary} onClick={() => setClearedNotificationIds(adminNotifications.map((item) => String(item._id)))} type="button">Clear All</button>
+                </div>
               </div>
               <div className="mb-4 flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3 lg:flex-row lg:items-center">
                 <div className="relative min-w-0 flex-1">
@@ -3633,14 +3747,35 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </div>
                   ) : liveAlertChatMessages.map((item, index) => {
                     const fromStaff = item.senderRole === "admin" || item.senderRole === "superadmin" || item.senderRole === "staff";
+                    const fromSystem = item.senderRole === "system";
                     return (
-                      <div key={item._id || `${item.createdAt}-${index}`} className={`flex ${fromStaff ? "justify-end" : "justify-start"}`}>
-                        <div className={`max-w-[78%] rounded-2xl px-3 py-2 text-sm leading-5 shadow-sm ${fromStaff ? "rounded-br-sm bg-slate-900 text-white" : "rounded-bl-sm border border-slate-200 bg-white text-slate-700"}`}>
-                          <div className={`mb-1 flex items-center justify-between gap-3 text-[11px] font-semibold ${fromStaff ? "text-white/70" : "text-slate-500"}`}>
-                            <span>{fromStaff ? "Barangay staff" : item.senderName || "Resident"}</span>
+                      <div key={item._id || `${item.createdAt}-${index}`} className={`flex ${fromSystem ? "justify-center" : fromStaff ? "justify-end" : "justify-start"}`}>
+                        <div className={`max-w-[78%] rounded-2xl px-3 py-2 text-sm leading-5 shadow-sm ${fromSystem ? "border border-amber-100 bg-amber-50 text-amber-900" : fromStaff ? "rounded-br-sm bg-slate-900 text-white" : "rounded-bl-sm border border-slate-200 bg-white text-slate-700"}`}>
+                          <div className={`mb-1 flex items-center justify-between gap-3 text-[11px] font-semibold ${fromSystem ? "text-amber-700" : fromStaff ? "text-white/70" : "text-slate-500"}`}>
+                            <span>{fromSystem ? "System" : fromStaff ? "Barangay staff" : item.senderName || "Resident"}</span>
                             <span>{formatDateTime(item.createdAt)}</span>
                           </div>
-                          <p className="whitespace-pre-wrap">{item.message}</p>
+                          {item.message ? <p className="whitespace-pre-wrap">{item.message}</p> : null}
+                          {item.attachments?.length ? (
+                            <div className="mt-2 grid gap-2">
+                              {item.attachments.map((attachment, attachmentIndex) => (
+                                <a
+                                  key={`${attachment.name}-${attachmentIndex}`}
+                                  className={`overflow-hidden rounded-xl border text-xs font-semibold ${fromStaff ? "border-white/20 bg-white/10 text-white" : "border-slate-200 bg-slate-50 text-slate-700"}`}
+                                  href={attachment.dataUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {attachment.type.startsWith("image/") ? (
+                                    <img src={attachment.dataUrl} alt={attachment.name || "Attachment"} className="max-h-48 w-full object-cover" />
+                                  ) : (
+                                    <video src={attachment.dataUrl} className="max-h-48 w-full" controls />
+                                  )}
+                                  <span className="block truncate px-3 py-2">{attachment.name || "Attachment"}</span>
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -3664,15 +3799,54 @@ export default function RoleDashboard({ role }: DashboardProps) {
                       placeholder="Type instruction or update for the resident..."
                       className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:bg-white"
                     />
+                    <input
+                      ref={liveAlertFileInputRef}
+                      type="file"
+                      accept="image/*,video/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => void addLiveAlertChatFiles(e.target.files)}
+                    />
+                    <button
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      onClick={() => liveAlertFileInputRef.current?.click()}
+                      type="button"
+                      aria-label="Attach image or video"
+                    >
+                      <Paperclip size={16} />
+                    </button>
                     <button
                       className={btnPrimary}
-                      disabled={!liveAlertChatText.trim() || liveAlertChatSending}
+                      disabled={(!liveAlertChatText.trim() && liveAlertChatAttachments.length === 0) || liveAlertChatSending || liveAlertChatModal.status === "resolved"}
                       onClick={() => void sendLiveAlertChatMessage()}
                       type="button"
                     >
                       Send
                     </button>
                   </div>
+                  {liveAlertChatAttachments.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {liveAlertChatAttachments.map((attachment, index) => (
+                        <button
+                          key={`${attachment.name}-${index}`}
+                          className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-600 hover:bg-red-50 hover:text-red-700"
+                          onClick={() => setLiveAlertChatAttachments((prev) => prev.filter((_, i) => i !== index))}
+                          type="button"
+                        >
+                          {attachment.name} x
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {liveAlertChatModal.residentRating ? (
+                    <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50 p-3">
+                      <div className="flex flex-wrap items-center gap-2 text-amber-700">
+                        {[1, 2, 3, 4, 5].map((star) => <Star key={star} size={15} fill={star <= Number(liveAlertChatModal.residentRating) ? "currentColor" : "none"} />)}
+                        <span className="text-xs font-bold text-amber-900">{liveAlertChatModal.residentRating}/5 resident rating</span>
+                      </div>
+                      {liveAlertChatModal.residentRatingComment ? <p className="mt-2 text-xs text-amber-900">{liveAlertChatModal.residentRatingComment}</p> : null}
+                    </div>
+                  ) : null}
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       className={btnSecondary}
@@ -3683,10 +3857,10 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </button>
                     <button
                       className={btnPrimary}
-                      onClick={() => setPendingAction({ title: "Resolve Live Alert", message: `Mark ${liveAlertChatModal.referenceNo} as resolved?`, confirmLabel: "Resolve", run: () => runActionWithFeedback("Live alert resolved", () => api.patch(`/api/emergency-alerts/${liveAlertChatModal._id}/status`, { status: "resolved" }, { headers: authHeaders() })) })}
+                      onClick={() => setPendingAction({ title: "End Live Chat", message: `End the live chat for ${liveAlertChatModal.referenceNo}? The resident will be asked to rate the help.`, confirmLabel: "End Chat", run: () => endLiveAlertChat(liveAlertChatModal) })}
                       type="button"
                     >
-                      Resolved
+                      End Chat / Resolved
                     </button>
                     <button
                       className={btnSecondary}

@@ -48,6 +48,7 @@ function resolveDailyActivityRange(value) {
 }
 
 function serializeActivityLog(a) {
+  const fullName = [a.user?.firstName, a.user?.middleName, a.user?.lastName].filter(Boolean).join(' ').trim();
   return {
     _id: a._id,
     type: a.type,
@@ -56,6 +57,10 @@ function serializeActivityLog(a) {
     createdAt: a.createdAt,
     userId: a.user?._id || a.metadata?.actorId || null,
     userName: a.user?.username || a.actorName || a.metadata?.actorName || 'system',
+    userFullName: fullName || a.user?.username || a.actorName || a.metadata?.actorName || 'system',
+    userContact: a.user?.contactNumber || a.metadata?.contactNumber || '',
+    userEmail: a.user?.email || a.metadata?.email || '',
+    userAddress: a.user?.address || a.metadata?.address || '',
     userRole: a.user?.role || a.actorRole || a.metadata?.actorRole || 'system',
     metadata: a.metadata || {},
   };
@@ -678,7 +683,7 @@ router.get('/activity/me', auth, async (req, res) => {
     })
       .sort({ createdAt: -1 })
       .limit(150)
-      .populate('user', 'username role')
+      .populate('user', 'username firstName middleName lastName email contactNumber address role')
       .lean();
 
     const rows = activities.map(serializeActivityLog);
@@ -694,7 +699,7 @@ router.get('/activity', auth, requireRoles('admin', 'superadmin'), async (req, r
     const activities = await ActivityLog.find({ createdAt: { $gte: start, $lt: end } })
       .sort({ createdAt: -1 })
       .limit(150)
-      .populate('user', 'username role')
+      .populate('user', 'username firstName middleName lastName email contactNumber address role')
       .lean();
 
     const rows = activities.map(serializeActivityLog);
@@ -712,7 +717,7 @@ router.get('/notifications', auth, requireRoles('admin', 'superadmin'), async (r
     const activities = await ActivityLog.find({ createdAt: { $gte: start, $lt: end } })
       .sort({ createdAt: -1 })
       .limit(200)
-      .populate('user', 'username role')
+      .populate('user', 'username firstName middleName lastName email contactNumber address role')
       .lean();
 
     const items = activities.map(serializeActivityLog);

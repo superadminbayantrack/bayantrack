@@ -9,6 +9,8 @@ import { logSystemEvent, resolveActorDetails } from '../utils/notifications.js';
 const router = express.Router();
 const ALERT_STATUSES = ['active', 'acknowledged', 'resolved', 'cancelled'];
 const CHAT_MESSAGE_LIMIT = 200;
+const CHAT_ATTACHMENT_LIMIT = 3;
+const MAX_ATTACHMENT_DATA_URL_LENGTH = 6_500_000;
 
 function normalizeSituation(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -86,6 +88,22 @@ function normalizeChatMessage(value) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
 }
 
+function normalizeChatAttachments(value = []) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, CHAT_ATTACHMENT_LIMIT).map((item) => {
+    const dataUrl = String(item?.dataUrl || '');
+    const type = String(item?.type || '').slice(0, 120);
+    if (!dataUrl.startsWith('data:') || dataUrl.length > MAX_ATTACHMENT_DATA_URL_LENGTH) return null;
+    if (!type.startsWith('image/') && !type.startsWith('video/')) return null;
+    return {
+      name: String(item?.name || 'attachment').replace(/\s+/g, ' ').trim().slice(0, 160),
+      type,
+      size: Number.isFinite(Number(item?.size)) ? Number(item.size) : 0,
+      dataUrl,
+    };
+  }).filter(Boolean);
+}
+
 function freshTypingState(value = {}) {
   if (!value?.isTyping || !value?.at) return null;
   const typedAt = new Date(value.at);
@@ -108,6 +126,12 @@ function alertChatPayload(alert) {
       situation: item.situation,
       status: item.status,
       archived: item.archived,
+      chatEndedAt: item.chatEndedAt,
+      chatEndedByName: item.chatEndedByName,
+      chatEndedByRole: item.chatEndedByRole,
+      residentRating: item.residentRating,
+      residentRatingComment: item.residentRatingComment,
+      residentRatedAt: item.residentRatedAt,
       residentSnapshot: item.residentSnapshot,
       currentLocation: item.currentLocation,
       updatedAt: item.updatedAt,
@@ -243,8 +267,9 @@ router.post('/:id/messages', auth, async (req, res) => {
     }
 
     const message = normalizeChatMessage(req.body.message);
-    if (!message) {
-      return res.status(400).json({ msg: 'Message is required.' });
+    const attachments = normalizeChatAttachments(req.body.attachments);
+    if (!message && attachments.length === 0) {
+      return res.status(400).json({ msg: 'Message or attachment is required.' });
     }
 
     const sender = await getChatSender(req, alert);
@@ -253,6 +278,7 @@ router.post('/:id/messages', auth, async (req, res) => {
       senderRole: sender.senderRole,
       senderName: sender.senderName,
       message,
+      attachments,
       createdAt: new Date(),
     });
     if (alert.chatMessages.length > CHAT_MESSAGE_LIMIT) {
@@ -280,6 +306,105 @@ router.post('/:id/messages', auth, async (req, res) => {
   } catch (err) {
     console.error('Failed to send emergency alert chat message:', err);
     return res.status(500).json({ msg: 'Failed to send live chat message.' });
+  }
+});
+
+router.patch('/:id/end-chat', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
+  try {
+    const alert = await EmergencyAlert.findById(req.params.id);
+    if (!alert) {
+      return res.status(404).json({ msg: 'Live alert not found.' });
+    }
+
+    const actor = await resolveActorDetails(req.user);
+    const endedAt = new Date();
+    const note = normalizeChatMessage(req.body.message)
+      || `The live chat was ended by ${actor.role === 'superadmin' ? 'the superadmin' : 'barangay staff'}.`;
+
+    alert.status = 'resolved';
+    alert.chatEndedAt = endedAt;
+    alert.chatEndedByName = actor.name;
+    alert.chatEndedByRole = actor.role;
+    alert.handledByName = actor.name;
+    alert.handledByRole = actor.role;
+    alert.handledByUser = mongoose.Types.ObjectId.isValid(String(actor.id)) ? actor.id : null;
+    alert.handledAt = endedAt;
+    alert.typing = alert.typing || {};
+    alert.typing.resident = { isTyping: false, name: alert.typing?.resident?.name || '', role: 'resident', at: endedAt };
+    alert.typing.staff = { isTyping: false, name: actor.name, role: actor.role, at: endedAt };
+    alert.chatMessages.push({
+      senderUser: String(actor.id || req.user.id || ''),
+      senderRole: 'system',
+      senderName: 'BayanTrack System',
+      message: note,
+      createdAt: endedAt,
+    });
+    if (alert.chatMessages.length > CHAT_MESSAGE_LIMIT) {
+      alert.chatMessages = alert.chatMessages.slice(-CHAT_MESSAGE_LIMIT);
+    }
+
+    await alert.save();
+
+    await writeAlertEvent({
+      userId: req.user.id,
+      type: 'emergency-alert',
+      title: `Live emergency chat ended: ${alert.referenceNo}`,
+      referenceNo: alert.referenceNo,
+      metadata: { action: 'end-chat', situation: alert.situation },
+    });
+
+    return res.json(alertChatPayload(alert));
+  } catch (err) {
+    console.error('Failed to end emergency alert chat:', err);
+    return res.status(500).json({ msg: 'Failed to end live chat.' });
+  }
+});
+
+router.patch('/:id/rating', auth, async (req, res) => {
+  try {
+    const alert = await EmergencyAlert.findById(req.params.id);
+    if (!alert) {
+      return res.status(404).json({ msg: 'Live alert not found.' });
+    }
+    if (String(alert.user) !== String(req.user.id)) {
+      return res.status(403).json({ msg: 'Forbidden' });
+    }
+    if (!alert.chatEndedAt && alert.status !== 'resolved') {
+      return res.status(409).json({ msg: 'You can rate this chat after it is resolved.' });
+    }
+
+    const rating = Number(req.body.rating);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      return res.status(400).json({ msg: 'Rating must be from 1 to 5.' });
+    }
+
+    alert.residentRating = rating;
+    alert.residentRatingComment = String(req.body.comment || '').replace(/\s+/g, ' ').trim().slice(0, 800);
+    alert.residentRatedAt = new Date();
+    alert.chatMessages.push({
+      senderUser: String(req.user.id || ''),
+      senderRole: 'system',
+      senderName: 'BayanTrack System',
+      message: `Resident submitted a ${rating}/5 help rating${alert.residentRatingComment ? `: ${alert.residentRatingComment}` : '.'}`,
+      createdAt: alert.residentRatedAt,
+    });
+    if (alert.chatMessages.length > CHAT_MESSAGE_LIMIT) {
+      alert.chatMessages = alert.chatMessages.slice(-CHAT_MESSAGE_LIMIT);
+    }
+    await alert.save();
+
+    await writeAlertEvent({
+      userId: req.user.id,
+      type: 'emergency-alert',
+      title: `Resident rated live chat ${rating}/5: ${alert.referenceNo}`,
+      referenceNo: alert.referenceNo,
+      metadata: { action: 'rating', rating, situation: alert.situation },
+    });
+
+    return res.json(alertChatPayload(alert));
+  } catch (err) {
+    console.error('Failed to submit emergency alert rating:', err);
+    return res.status(500).json({ msg: 'Failed to submit live chat rating.' });
   }
 });
 

@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Facebook, MapPin, Phone, Mail } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import brandLogo from "../../assets/brandlogo/brand_logo.png";
+import brandLogo from "../../assets/brandlogo/Brand_Logo_Footer.png";
 
 function normalizeBrandText(value?: string) {
   const cleaned = String(value || "BayanTrack").replace(/\s*\+\s*$/g, "").replace(/\s+/g, " ").trim();
