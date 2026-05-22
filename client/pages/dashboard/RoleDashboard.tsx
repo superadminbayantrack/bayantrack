@@ -12,6 +12,7 @@ type Panel = "overview" | "users" | "officials" | "announcements" | "reports" | 
 type FilterPanel = "users" | "announcements" | "reports" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "audit";
 type MonthlyDetailKind = "users" | "services" | "reports" | "messages";
 type RatingRange = "days" | "weeks" | "months" | "years";
+const MONTHLY_DETAIL_PAGE_SIZE = 5;
 type TableFilterState = { search: string; date: string; time: string };
 type MobileDashboardAction = { label: string; run: () => void; tone?: "default" | "danger" };
 type PermissionFlags = { view: boolean; add: boolean; edit: boolean; archive: boolean; delete: boolean };
@@ -605,6 +606,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [liveAlertCategory, setLiveAlertCategory] = useState<"unresolved" | "resolved" | "all">("unresolved");
   const [notificationCategory, setNotificationCategory] = useState("all");
   const [monthlyDetailModal, setMonthlyDetailModal] = useState<MonthlyDetailKind | null>(null);
+  const [monthlyDetailPage, setMonthlyDetailPage] = useState(1);
   const [ratingDetailOpen, setRatingDetailOpen] = useState(false);
   const [ratingRange, setRatingRange] = useState<RatingRange>("days");
   const [mobileActionMenu, setMobileActionMenu] = useState<{ title: string; actions: MobileDashboardAction[] } | null>(null);
@@ -799,10 +801,18 @@ export default function RoleDashboard({ role }: DashboardProps) {
     })).slice(-8);
   }, [alertRatingDetails, ratingRange]);
 
-  const recentActivityDetails = useMemo(() => activities.slice(0, 5), [activities]);
+  const alertRatingDistribution = useMemo(() => {
+    const total = Math.max(1, alertRatingDetails.length);
+    return [5, 4, 3, 2, 1].map((rating) => {
+      const count = alertRatingDetails.filter((alert) => Math.round(Number(alert.residentRating || 0)) === rating).length;
+      return { rating, count, percentage: Math.round((count / total) * 100) };
+    });
+  }, [alertRatingDetails]);
+
+  const recentActivityDetails = useMemo(() => activities.slice(0, 3), [activities]);
 
   const visibleAdminNotifications = adminNotifications;
-  const recentAdminNotices = useMemo(() => visibleAdminNotifications.slice(0, 6), [visibleAdminNotifications]);
+  const recentAdminNotices = useMemo(() => visibleAdminNotifications.slice(0, 3), [visibleAdminNotifications]);
   const normalizedSearch = normalizeSearch(searchQuery);
   const normalizedRestoreSearch = normalizeSearch(restoreSearch);
   const normalizedNotificationSearch = normalizeSearch(notificationSearch);
@@ -1852,6 +1862,24 @@ export default function RoleDashboard({ role }: DashboardProps) {
       </>
     );
   };
+  const openRestoreConfirmation = (title: string, message: string, successTitle: string, action: () => Promise<unknown>) => {
+    setPendingAction({
+      title,
+      message,
+      confirmLabel: "Restore",
+      run: () => runActionWithFeedback(successTitle, () => action().then(() => undefined)),
+    });
+  };
+  const renderRestoreActionControls = (label: string, title: string, message: string, successTitle: string, action: () => Promise<unknown>) => {
+    const run = () => openRestoreConfirmation(title, message, successTitle, action);
+    return renderActionControls(
+      label,
+      <button className={iconBtn} onClick={run} type="button" title="Restore item" aria-label="Restore item">
+        <Archive size={16} />
+      </button>,
+      [{ label: "Restore", run }],
+    );
+  };
 
   const handlerOptions = useMemo<HandlerOption[]>(() => {
     const userFullName = (user: UserItem) =>
@@ -2022,7 +2050,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   <div className="space-y-2">
                     {recentAdminNotices.length === 0 ? (
                       <p className="rounded-xl bg-slate-50 px-3 py-3 text-xs text-slate-500">No recent dashboard updates.</p>
-                    ) : recentAdminNotices.slice(0, 5).map((item) => (
+                    ) : recentAdminNotices.slice(0, 3).map((item) => (
                       <div key={item._id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                         <p className="text-xs font-semibold text-slate-900">{item.title}</p>
                         <p className="mt-1 text-[11px] text-slate-500">{item.userRole || "system"} | {new Date(item.createdAt).toLocaleString()}</p>
@@ -2059,6 +2087,17 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </div>
               );
             })}
+            <button
+              className="mt-2 flex w-full items-center gap-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-left text-sm font-bold text-red-700 transition hover:bg-red-100"
+              onClick={() => {
+                setIsMenuOpen(false);
+                setShowLogoutDialog(true);
+              }}
+              type="button"
+            >
+              <LogOut size={16} />
+              <span>Logout</span>
+            </button>
           </div>
         </div>
       )}
@@ -2290,7 +2329,16 @@ export default function RoleDashboard({ role }: DashboardProps) {
                       <div key={series.key} className={`rounded-2xl border ${series.border} bg-slate-50 p-4`}>
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-sm font-semibold text-slate-900">{series.label}</p>
-                          <button className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 transition hover:bg-slate-100" onClick={() => setMonthlyDetailModal(series.key)} type="button">View</button>
+                          <button
+                            className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 transition hover:bg-slate-100"
+                            onClick={() => {
+                              setMonthlyDetailPage(1);
+                              setMonthlyDetailModal(series.key);
+                            }}
+                            type="button"
+                          >
+                            View
+                          </button>
                         </div>
                         <div className="mt-4 flex h-36 items-end gap-2">
                           {monthlyOverview.map((row) => {
@@ -3093,7 +3141,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                             <td className="px-4 py-3"><p className="font-semibold text-slate-900">{[user.firstName, user.middleName, user.lastName].filter(Boolean).join(" ") || "N/A"}</p><p className="text-xs text-slate-500">{user.email}</p></td>
                             <td className="px-4 py-3 text-slate-700">{user.username}</td>
                             <td className="px-4 py-3"><Badge value="archived" /></td>
-                            <td className="px-4 py-3"><button className={iconBtn}  onClick={() => setPendingAction({ title: "Restore User", message: `Restore ${user.username}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("User restored", () => api.patch(`/api/admin/users/${user._id}/status`, { status: "active" }, { headers: authHeaders() })) })} type="button" title="Restore item" aria-label="Restore item"><Archive size={16} /></button></td>
+                            <td className="px-4 py-3">{renderRestoreActionControls(`Archived user ${user.username}`, "Restore User", `Restore ${user.username}?`, "User restored", () => api.patch(`/api/admin/users/${user._id}/status`, { status: "active" }, { headers: authHeaders() }))}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -3114,7 +3162,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.name}</td>
                             <td className="px-4 py-3 text-slate-700">{item.role}</td>
-                            <td className="px-4 py-3"><button className={iconBtn}  onClick={() => setPendingAction({ title: "Restore Official", message: `Restore ${item.name}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("Official restored", () => api.put(`/api/officials/${item._id}`, { ...item, active: true }, { headers: authHeaders() })) })} type="button" title="Restore item" aria-label="Restore item"><Archive size={16} /></button></td>
+                            <td className="px-4 py-3">{renderRestoreActionControls(`Archived official ${item.name}`, "Restore Official", `Restore ${item.name}?`, "Official restored", () => api.put(`/api/officials/${item._id}`, { ...item, active: true }, { headers: authHeaders() }))}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -3135,7 +3183,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.title}</td>
                             <td className="px-4 py-3 text-slate-700">{item.module}</td>
-                            <td className="px-4 py-3"><button className={iconBtn}  onClick={() => setPendingAction({ title: "Restore Announcement", message: `Restore ${item.title}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("Announcement restored", () => api.patch(`/api/announcements/${item._id}/archive`, { archived: false }, { headers: authHeaders() })) })} type="button" title="Restore item" aria-label="Restore item"><Archive size={16} /></button></td>
+                            <td className="px-4 py-3">{renderRestoreActionControls(`Archived announcement ${item.title}`, "Restore Announcement", `Restore ${item.title}?`, "Announcement restored", () => api.patch(`/api/announcements/${item._id}/archive`, { archived: false }, { headers: authHeaders() }))}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -3156,7 +3204,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.referenceNo}</td>
                             <td className="px-4 py-3 text-slate-700">{item.category}</td>
-                            <td className="px-4 py-3"><button className={iconBtn}  onClick={() => setPendingAction({ title: "Restore Report", message: `Restore ${item.referenceNo}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("Report restored", () => api.patch(`/api/reports/${item._id}/status`, { status: "new", adminChecked: false }, { headers: authHeaders() })) })} type="button" title="Restore item" aria-label="Restore item"><Archive size={16} /></button></td>
+                            <td className="px-4 py-3">{renderRestoreActionControls(`Archived report ${item.referenceNo}`, "Restore Report", `Restore ${item.referenceNo}?`, "Report restored", () => api.patch(`/api/reports/${item._id}/status`, { status: "new", adminChecked: false }, { headers: authHeaders() }))}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -3177,7 +3225,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.referenceNo}</td>
                             <td className="px-4 py-3 text-slate-700">{item.serviceType}</td>
-                            <td className="px-4 py-3"><button className={iconBtn}  onClick={() => setPendingAction({ title: "Restore Service Request", message: `Restore ${item.referenceNo}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("Service request restored", () => api.patch(`/api/services/requests/${item._id}/status`, { status: "pending", note: "Restored by barangay staff" }, { headers: authHeaders() })) })} type="button" title="Restore item" aria-label="Restore item"><Archive size={16} /></button></td>
+                            <td className="px-4 py-3">{renderRestoreActionControls(`Archived service request ${item.referenceNo}`, "Restore Service Request", `Restore ${item.referenceNo}?`, "Service request restored", () => api.patch(`/api/services/requests/${item._id}/status`, { status: "pending", note: "Restored by barangay staff" }, { headers: authHeaders() }))}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -3198,7 +3246,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.referenceNo}</td>
                             <td className="px-4 py-3 text-slate-700">{item.name}</td>
-                            <td className="px-4 py-3"><button className={iconBtn}  onClick={() => setPendingAction({ title: "Restore Message", message: `Restore ${item.referenceNo}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("Message restored", () => api.patch(`/api/contact/messages/${item._id}/status`, { status: "new" }, { headers: authHeaders() })) })} type="button" title="Restore item" aria-label="Restore item"><Archive size={16} /></button></td>
+                            <td className="px-4 py-3">{renderRestoreActionControls(`Archived message ${item.referenceNo}`, "Restore Message", `Restore ${item.referenceNo}?`, "Message restored", () => api.patch(`/api/contact/messages/${item._id}/status`, { status: "new" }, { headers: authHeaders() }))}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -3219,7 +3267,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.email}</td>
                             <td className="px-4 py-3"><Badge value={item.status} /></td>
-                            <td className="px-4 py-3"><button className={iconBtn}  onClick={() => setPendingAction({ title: "Restore Subscriber", message: `Restore ${item.email}?`, confirmLabel: "Restore", run: () => runActionWithFeedback("Subscriber restored", () => api.patch(`/api/subscriptions/${item._id}/status`, { status: "active" }, { headers: authHeaders() })) })} type="button" title="Restore item" aria-label="Restore item"><Archive size={16} /></button></td>
+                            <td className="px-4 py-3">{renderRestoreActionControls(`Archived subscriber ${item.email}`, "Restore Subscriber", `Restore ${item.email}?`, "Subscriber restored", () => api.patch(`/api/subscriptions/${item._id}/status`, { status: "active" }, { headers: authHeaders() }))}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -4632,6 +4680,12 @@ export default function RoleDashboard({ role }: DashboardProps) {
         const rows = [...monthlyDetailRows[monthlyDetailModal]].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
         const columns = monthlyDetailColumns[monthlyDetailModal];
         const max = Math.max(1, ...monthlyOverview.map((row) => Number(row[monthlyDetailModal] || 0)));
+        const totalPages = Math.max(1, Math.ceil(rows.length / MONTHLY_DETAIL_PAGE_SIZE));
+        const currentPage = Math.min(monthlyDetailPage, totalPages);
+        const paginatedRows = rows.slice(
+          (currentPage - 1) * MONTHLY_DETAIL_PAGE_SIZE,
+          currentPage * MONTHLY_DETAIL_PAGE_SIZE,
+        );
         return (
           <div className={modalOverlay}>
             <div className={`${modalCard} max-w-6xl`}>
@@ -4669,7 +4723,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row) => (
+                    {paginatedRows.map((row) => (
                       <tr key={row.id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 text-xs font-semibold text-slate-600">{formatDateOnly(row.createdAt)}</td>
                         <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatTimeOnly(row.createdAt)}</td>
@@ -4680,6 +4734,34 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {rows.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">No matching records in the last 6 months.</p> : null}
+              {rows.length > 0 ? (
+                <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs font-semibold text-slate-500">
+                    Showing {(currentPage - 1) * MONTHLY_DETAIL_PAGE_SIZE + 1}-{Math.min(currentPage * MONTHLY_DETAIL_PAGE_SIZE, rows.length)} of {rows.length}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={currentPage <= 1}
+                      onClick={() => setMonthlyDetailPage((page) => Math.max(1, page - 1))}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <span className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-700">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setMonthlyDetailPage((page) => Math.min(totalPages, page + 1))}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         );
@@ -4708,22 +4790,55 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </button>
               ))}
             </div>
-            <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
-              {alertRatingChartData.length === 0 ? (
-                <p className="text-sm text-slate-500">No rating data yet.</p>
-              ) : (
-                <div className="flex h-52 items-end gap-3">
-                  {alertRatingChartData.map((item) => (
-                    <div key={item.label} className="flex flex-1 flex-col items-center gap-2">
-                      <div className="flex h-40 w-full items-end rounded-xl bg-white/80 px-2 pt-2">
-                        <div className="w-full rounded-t-lg bg-amber-500 shadow-sm transition-all duration-300 ease-out" style={{ height: `${Math.max(8, Math.round((item.average / 5) * 100))}%` }} />
+            <div className="grid gap-4 lg:grid-cols-[0.9fr,1.1fr]">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Average</p>
+                    <div className="mt-2 flex items-end gap-2">
+                      <span className="text-3xl font-black text-slate-950">{alertRatingSummary.average.toFixed(1)}</span>
+                      <span className="pb-1 text-sm font-bold text-slate-500">/ 5</span>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Rated alerts</p>
+                    <p className="mt-2 text-3xl font-black text-slate-950">{alertRatingSummary.count}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Comments</p>
+                    <p className="mt-2 text-3xl font-black text-slate-950">{alertRatingDetails.filter((alert) => alert.residentRatingComment).length}</p>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-2">
+                  {alertRatingDistribution.map((item) => (
+                    <div key={item.rating} className="grid grid-cols-[44px,1fr,34px] items-center gap-2 text-xs">
+                      <span className="inline-flex items-center gap-1 font-bold text-slate-700">{item.rating}<Star size={12} className="fill-amber-400 text-amber-400" /></span>
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                        <div className="h-full rounded-full bg-slate-900 transition-all duration-300 ease-out" style={{ width: `${item.percentage}%` }} />
                       </div>
-                      <span className="text-center text-[11px] font-bold text-slate-600">{item.label}</span>
-                      <span className="text-[11px] text-slate-500">{item.average.toFixed(1)} ({item.count})</span>
+                      <span className="text-right font-semibold text-slate-500">{item.count}</span>
                     </div>
                   ))}
                 </div>
-              )}
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="mb-4 text-xs font-bold uppercase tracking-wide text-slate-400">Trend by {ratingRange}</p>
+                {alertRatingChartData.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">No rating data yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {alertRatingChartData.map((item) => (
+                      <div key={item.label} className="grid gap-2 sm:grid-cols-[90px,1fr,72px] sm:items-center">
+                        <span className="text-xs font-bold text-slate-600">{item.label}</span>
+                        <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                          <div className="h-full rounded-full bg-amber-500 transition-all duration-300 ease-out" style={{ width: `${Math.max(4, Math.round((item.average / 5) * 100))}%` }} />
+                        </div>
+                        <span className="text-xs font-semibold text-slate-500">{item.average.toFixed(1)} ({item.count})</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
               <table className="min-w-full text-left text-sm">

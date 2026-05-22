@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowRight, Bot, FileText, Megaphone, ShieldAlert, UserCog, X } from "lucide-react";
 import { getRole, hasAuthSession } from "@/lib/auth";
+import { api } from "@/lib/api";
 
 const TOUR_STORAGE_KEY = "bayantrack_resident_quick_tour_seen";
+const NEW_ACCOUNT_TOUR_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const tourSteps = [
   {
@@ -48,17 +50,40 @@ export function ResidentQuickTour() {
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
+  const [seenKey, setSeenKey] = useState(TOUR_STORAGE_KEY);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    let cancelled = false;
+    let timer: number | undefined;
     const blockedRoutes = ["/", "/login", "/admin-dashboard", "/super-admin-dashboard"];
     const isBlocked = blockedRoutes.includes(location.pathname);
-    const alreadySeen = window.localStorage.getItem(TOUR_STORAGE_KEY) === "true";
 
-    if (!isBlocked && hasAuthSession() && getRole() === "resident" && !alreadySeen) {
-      const timer = window.setTimeout(() => setIsOpen(true), 650);
-      return () => window.clearTimeout(timer);
-    }
+    const maybeOpenTour = async () => {
+      if (isBlocked || !hasAuthSession() || getRole() !== "resident") return;
+      try {
+        const res = await api.get("/api/auth/user");
+        const tourReferenceAt = new Date(res.data?.statusReviewedAt || res.data?.createdAt || "").getTime();
+        const isNewAccount = Number.isFinite(tourReferenceAt) && Date.now() - tourReferenceAt <= NEW_ACCOUNT_TOUR_WINDOW_MS;
+        const accountKey = `${TOUR_STORAGE_KEY}:${res.data?._id || res.data?.email || "resident"}`;
+        const alreadySeen = window.localStorage.getItem(accountKey) === "true";
+
+        if (!cancelled) {
+          setSeenKey(accountKey);
+          if (isNewAccount && !alreadySeen) {
+            timer = window.setTimeout(() => setIsOpen(true), 650);
+          }
+        }
+      } catch {
+        // Existing or unavailable account data should not force the guide to appear.
+      }
+    };
+
+    void maybeOpenTour();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
   }, [location.pathname]);
 
   if (!isOpen) return null;
@@ -67,7 +92,7 @@ export function ResidentQuickTour() {
   const isLastStep = stepIndex === tourSteps.length - 1;
 
   const closeTour = () => {
-    window.localStorage.setItem(TOUR_STORAGE_KEY, "true");
+    window.localStorage.setItem(seenKey, "true");
     setIsOpen(false);
   };
 

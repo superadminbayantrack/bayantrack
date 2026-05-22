@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import Otp from '../models/Otp.js';
 import ActivityLog from '../models/ActivityLog.js';
+import NotificationState from '../models/NotificationState.js';
 import SystemSetting from '../models/SystemSetting.js';
 import ServiceRequest from '../models/ServiceRequest.js';
 import { auth } from '../middleware/auth.js';
@@ -32,6 +33,10 @@ const ALLOWED_SUBDIVISIONS = [
   'talaba',
 ];
 const OTP_EMAIL_UNAVAILABLE_MESSAGE = 'OTP email service is currently unavailable. Check the Vercel email environment variables.';
+
+function residentNotificationActorKey(userPayload = {}) {
+  return `resident:${String(userPayload?.id || userPayload?._id || 'unknown').trim() || 'unknown'}`;
+}
 
 function setAuthCookie(req, res, token) {
   res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions(req));
@@ -916,6 +921,8 @@ router.put('/user', auth, async (req, res) => {
 // @access  Private
 router.get('/notifications', auth, async (req, res) => {
   try {
+    const state = await NotificationState.findOne({ actorId: residentNotificationActorKey(req.user) }).lean();
+    const clearedAt = state?.clearedAt ? new Date(state.clearedAt) : null;
     const [latestServices, latestActivity] = await Promise.all([
       ServiceRequest.find({ user: req.user.id })
         .sort({ updatedAt: -1 })
@@ -943,12 +950,32 @@ router.get('/notifications', auth, async (req, res) => {
         createdAt: a.createdAt,
       })),
     ]
+      .filter((notice) => !clearedAt || new Date(notice.createdAt).getTime() > clearedAt.getTime())
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 10);
 
     return res.json({ count: notices.length, items: notices });
   } catch (_err) {
     return res.status(500).json({ msg: 'Failed to fetch notifications' });
+  }
+});
+
+// @route   PATCH api/auth/notifications/clear
+// @desc    Clear resident notification feed for the current account
+// @access  Private
+router.patch('/notifications/clear', auth, async (req, res) => {
+  try {
+    const actorId = residentNotificationActorKey(req.user);
+    const clearedAt = new Date();
+    const state = await NotificationState.findOneAndUpdate(
+      { actorId },
+      { actorId, clearedAt },
+      { new: true, upsert: true },
+    ).lean();
+
+    return res.json({ msg: 'Notifications cleared', clearedAt: state.clearedAt });
+  } catch (_err) {
+    return res.status(500).json({ msg: 'Failed to clear notifications' });
   }
 });
 

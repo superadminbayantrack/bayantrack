@@ -8,6 +8,4 @@ const NotificationStateSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-NotificationStateSchema.index({ actorId: 1 });
-
 export default mongoose.model('NotificationState', NotificationStateSchema);

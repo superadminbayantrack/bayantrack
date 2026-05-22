@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { LogoutConfirmation } from '@/components/LogoutConfirmation';
 
 import { Button } from "@/components/ui/button";
-import { User, ChevronDown, Menu, Bell } from "lucide-react";
+import { User, ChevronDown, Menu, Bell, CheckCircle2, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { clearAuthSession, hasAuthSession } from "@/lib/auth";
 import { api } from "@/lib/api";
@@ -29,8 +29,19 @@ export function Header() {
   const [showLogoutDialog, setShowLogoutDialog] = React.useState(false);
   const [isLoggingOut, setIsLoggingOut] = React.useState(false);
   const [notifications, setNotifications] = React.useState<any[]>([]);
+  const [showNotificationsModal, setShowNotificationsModal] = React.useState(false);
   const [isAnnouncementsMenuOpen, setIsAnnouncementsMenuOpen] = React.useState(false);
   const [brandText, setBrandText] = React.useState("BayanTrack");
+
+  const fetchNotifications = React.useCallback(async () => {
+    if (!hasAuthSession()) return;
+    try {
+      const res = await api.get("/api/auth/notifications");
+      setNotifications(res.data?.items || []);
+    } catch (_err) {
+      setNotifications([]);
+    }
+  }, []);
 
   React.useEffect(() => {
     const fetchUser = async () => {
@@ -47,21 +58,12 @@ export function Header() {
   }, []);
 
   React.useEffect(() => {
-    const fetchNotifications = async () => {
-      if (!hasAuthSession()) return;
-      try {
-        const res = await api.get("/api/auth/notifications");
-        setNotifications(res.data?.items || []);
-      } catch (_err) {
-        setNotifications([]);
-      }
-    };
     void fetchNotifications();
     const timer = window.setInterval(() => {
       void fetchNotifications();
     }, 8000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [fetchNotifications]);
 
   React.useEffect(() => {
     const fetchBrand = async () => {
@@ -99,6 +101,25 @@ export function Header() {
 
   const handleLogoutClick = () => {
     setShowLogoutDialog(true);
+  };
+
+  const openNotifications = () => {
+    setShowNotificationsModal(true);
+    setIsMenuOpen(false);
+  };
+
+  const checkNotification = (notificationId: string) => {
+    setNotifications((current) => current.filter((item) => item.id !== notificationId));
+  };
+
+  const clearNotifications = async () => {
+    setNotifications([]);
+    try {
+      await api.patch("/api/auth/notifications/clear");
+      await fetchNotifications();
+    } catch (_err) {
+      setNotifications([]);
+    }
   };
 
   const confirmLogout = () => {
@@ -206,8 +227,12 @@ export function Header() {
               <DropdownMenuItem asChild>
                 <Link to="/ProfileSettings">Profile Settings</Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link to="/ProfileSettings" className="flex items-center justify-between gap-3">
+              <DropdownMenuItem
+                onSelect={() => {
+                  openNotifications();
+                }}
+                className="flex cursor-pointer items-center justify-between gap-3"
+              >
                   <span className="inline-flex items-center gap-2">
                     <Bell className="h-4 w-4" />
                     Notifications
@@ -215,7 +240,6 @@ export function Header() {
                   <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
                     {notifications.length}
                   </span>
-                </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
 
@@ -294,7 +318,67 @@ export function Header() {
             >
               Profile Settings
             </Link>
+            <button
+              type="button"
+              onClick={openNotifications}
+              className="flex items-center justify-between rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-600"
+            >
+              <span>Notifications</span>
+              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">{notifications.length}</span>
+            </button>
           </nav>
+        </div>
+      )}
+
+      {showNotificationsModal && (
+        <div className="fixed right-3 top-20 z-[60] w-[calc(100vw-1.5rem)] max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl sm:right-6">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-500">Resident alerts</p>
+              <h3 className="text-base font-bold text-slate-900">Notifications</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowNotificationsModal(false)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-50"
+              aria-label="Close notifications"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+            {notifications.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">No notifications right now.</p>
+            ) : notifications.map((item) => (
+              <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-900">{item.title}</p>
+                    <p className="mt-1 truncate text-xs text-slate-500">{item.subtitle || item.kind}</p>
+                    <p className="mt-1 text-[11px] text-slate-400">{item.createdAt ? new Date(item.createdAt).toLocaleString() : ""}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => checkNotification(item.id)}
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-emerald-200 bg-white text-emerald-700 transition hover:bg-emerald-50"
+                    aria-label={`Check notification ${item.title}`}
+                    title="Check"
+                  >
+                    <CheckCircle2 size={15} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={clearNotifications}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-50"
+            >
+              <Trash2 size={14} /> Clear all
+            </button>
+          </div>
         </div>
       )}
 

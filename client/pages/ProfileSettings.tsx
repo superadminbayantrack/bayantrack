@@ -38,6 +38,7 @@ const DEFAULT_ADDRESS: AddressDetails = {
   province: "Cavite",
   zipCode: "4102",
 };
+const ACTIVITY_PAGE_SIZE = 5;
 
 type ChildLink = {
   _id?: string;
@@ -105,6 +106,7 @@ export default function ProfileSettings() {
   const [activitySearch, setActivitySearch] = useState("");
   const [activityDateFilter, setActivityDateFilter] = useState("");
   const [activityTimeFilter, setActivityTimeFilter] = useState("");
+  const [activityPage, setActivityPage] = useState(1);
   const [formData, setFormData] = useState({
     username: "",
     firstName: "",
@@ -439,8 +441,10 @@ export default function ProfileSettings() {
     }
   };
 
-  const recentActivities = activities.slice(0, 3);
-  const hiddenCount = Math.max(0, activities.length - 3);
+  const previewActivities = activities.slice(0, 3);
+  const visiblePreviewActivities = previewActivities.slice(0, 1);
+  const blurredPreviewActivities = previewActivities.slice(1);
+  const additionalHiddenCount = Math.max(0, activities.length - previewActivities.length);
   const filteredActivities = useMemo(() => {
     const query = activitySearch.trim().toLowerCase();
     return activities.filter((activity) => {
@@ -458,7 +462,17 @@ export default function ProfileSettings() {
       return matchesSearch && matchesDate && matchesTime;
     });
   }, [activities, activityDateFilter, activitySearch, activityTimeFilter]);
+  const activityTotalPages = Math.max(1, Math.ceil(filteredActivities.length / ACTIVITY_PAGE_SIZE));
+  const currentActivityPage = Math.min(activityPage, activityTotalPages);
+  const paginatedActivities = filteredActivities.slice(
+    (currentActivityPage - 1) * ACTIVITY_PAGE_SIZE,
+    currentActivityPage * ACTIVITY_PAGE_SIZE,
+  );
   const isChildSession = Boolean(actingChild);
+
+  useEffect(() => {
+    setActivityPage(1);
+  }, [activityDateFilter, activitySearch, activityTimeFilter]);
 
   const handleChildSessionRequestOtp = async () => {
     if (!childSessionForm.fullName.trim() || !childSessionForm.email.trim()) {
@@ -836,9 +850,12 @@ export default function ProfileSettings() {
                 <button
                   type="button"
                   className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-[12px] font-semibold text-[#1e3a8a] transition hover:bg-blue-100"
-                  onClick={() => setShowAllActivities(true)}
+                  onClick={() => {
+                    setActivityPage(1);
+                    setShowAllActivities(true);
+                  }}
                 >
-                  View
+                  View All
                 </button>
               </div>
 
@@ -851,7 +868,7 @@ export default function ProfileSettings() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {recentActivities.map((activity) => (
+                  {visiblePreviewActivities.map((activity) => (
                     <div key={activity._id} className="flex flex-col gap-3 rounded-[16px] border border-gray-200 bg-gray-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <p className="text-sm font-bold text-[#1e3a8a]">{activity.referenceNo || activity.type}</p>
@@ -862,18 +879,32 @@ export default function ProfileSettings() {
                       </span>
                     </div>
                   ))}
-                  {hiddenCount > 0 && (
-                    <div className="relative rounded-[16px] border border-gray-200 bg-gray-100/80 p-4 blur-[1px]">
-                      <p className="text-xs text-slate-500">+{hiddenCount} older activities hidden</p>
+                  {blurredPreviewActivities.map((activity) => (
+                    <div key={activity._id} className="pointer-events-none flex flex-col gap-3 rounded-[16px] border border-gray-200 bg-gray-100/80 p-4 opacity-70 blur-[1px] sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-[#1e3a8a]">{activity.referenceNo || activity.type}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">{activity.title}</p>
+                      </div>
+                      <span className="rounded border border-gray-100 bg-white px-2 py-1 text-[11px] font-medium text-slate-400">
+                        {new Date(activity.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  ))}
+                  {additionalHiddenCount > 0 && (
+                    <div className="rounded-[16px] border border-dashed border-gray-200 bg-gray-50 p-4 text-center">
+                      <p className="text-xs text-slate-500">+{additionalHiddenCount} more activities available in View All</p>
                     </div>
                   )}
-                  {activities.length > 3 && (
+                  {activities.length > 1 && (
                     <button
                       type="button"
                       className="w-full rounded-md border border-blue-200 bg-blue-50 py-2 text-sm font-semibold text-blue-700"
-                      onClick={() => setShowAllActivities(true)}
+                      onClick={() => {
+                        setActivityPage(1);
+                        setShowAllActivities(true);
+                      }}
                     >
-                      Expand Activity History
+                      View Full Activity History
                     </button>
                   )}
                 </div>
@@ -934,7 +965,7 @@ export default function ProfileSettings() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredActivities.map((activity) => {
+                  {paginatedActivities.map((activity) => {
                     const date = new Date(activity.createdAt);
                     return (
                       <tr key={activity._id} className="border-t border-slate-200 align-top">
@@ -954,6 +985,34 @@ export default function ProfileSettings() {
               </table>
               {filteredActivities.length === 0 && <p className="p-5 text-sm text-slate-500">No activity matched the selected filters.</p>}
             </div>
+            {filteredActivities.length > 0 && (
+              <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs font-semibold text-slate-500">
+                  Showing {(currentActivityPage - 1) * ACTIVITY_PAGE_SIZE + 1}-{Math.min(currentActivityPage * ACTIVITY_PAGE_SIZE, filteredActivities.length)} of {filteredActivities.length}
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={currentActivityPage <= 1}
+                    onClick={() => setActivityPage((page) => Math.max(1, page - 1))}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <span className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-700">
+                    Page {currentActivityPage} of {activityTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={currentActivityPage >= activityTotalPages}
+                    onClick={() => setActivityPage((page) => Math.min(activityTotalPages, page + 1))}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -713,11 +713,16 @@ router.delete('/users/:id', auth, requireRoles('superadmin'), async (req, res) =
 
 router.get('/activity/me', auth, async (req, res) => {
   try {
-    const { dateKey, start, end } = resolveDailyActivityRange(req.query.date);
-    const activities = await ActivityLog.find({
-      ...activityActorQuery(req.user.id),
-      createdAt: { $gte: start, $lt: end },
-    })
+    const query = { ...activityActorQuery(req.user.id) };
+    let dateKey = 'all';
+
+    if (req.query.date) {
+      const range = resolveDailyActivityRange(req.query.date);
+      dateKey = range.dateKey;
+      query.createdAt = { $gte: range.start, $lt: range.end };
+    }
+
+    const activities = await ActivityLog.find(query)
       .sort({ createdAt: -1 })
       .limit(150)
       .populate('user', 'username firstName middleName lastName email contactNumber address role')
