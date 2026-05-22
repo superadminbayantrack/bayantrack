@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { User, Info, Clock, X, Eye, EyeOff, MoreHorizontal, Send, Trash2 } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { User, Info, Clock, X, Eye, EyeOff, MoreHorizontal, Send, Trash2, Search, Filter } from "lucide-react";
 import { Chatbot } from "@/components/Chatbot";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
@@ -61,6 +61,31 @@ type ChildSessionForm = {
 };
 
 const RELATIONSHIP_OPTIONS = ["Child", "Son", "Daughter", "Stepchild", "Ward", "Dependent"];
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const digitOnly = (value: string, max = 11) => value.replace(/\D/g, "").slice(0, max);
+const cleanAddressValue = (value: string) => value.replace(/\s+/g, " ").trim();
+const stripAddressPrefix = (value: string, prefix: "blk" | "lot") => (
+  cleanAddressValue(value).replace(new RegExp(`^${prefix}\\.?\\s*`, "i"), "")
+);
+const composeResidentAddress = (details: AddressDetails) => {
+  const block = stripAddressPrefix(details.blk, "blk");
+  const lot = stripAddressPrefix(details.lot, "lot");
+  return [
+    block ? `Blk ${block}` : "",
+    lot ? `Lot ${lot}` : "",
+    cleanAddressValue(details.street),
+    cleanAddressValue(details.subdivision),
+    "Mambog II",
+    "Bacoor",
+    "Cavite",
+    "4102",
+  ].filter(Boolean).join(", ");
+};
+
+function activityStatusLabel(activity: Activity) {
+  const type = activity.type ? activity.type.replace(/[-_]/g, " ") : "activity";
+  return type.replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
 function childStatusDotClass(status?: ChildLink["status"]) {
   if (status === "approved") return "bg-emerald-500 ring-emerald-100";
@@ -77,6 +102,9 @@ export default function ProfileSettings() {
   const [saveProgress, setSaveProgress] = useState(0);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [showAllActivities, setShowAllActivities] = useState(false);
+  const [activitySearch, setActivitySearch] = useState("");
+  const [activityDateFilter, setActivityDateFilter] = useState("");
+  const [activityTimeFilter, setActivityTimeFilter] = useState("");
   const [formData, setFormData] = useState({
     username: "",
     firstName: "",
@@ -176,12 +204,19 @@ export default function ProfileSettings() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+    if (name === "contactNumber") {
+      setFormData((prev) => ({ ...prev, contactNumber: digitOnly(value) }));
+      return;
+    }
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleAddressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setAddressDetails((prev) => ({ ...prev, [name]: value }));
+    const nextValue = ["blk", "lot", "street", "subdivision"].includes(name)
+      ? value.replace(/\s{2,}/g, " ")
+      : value;
+    setAddressDetails((prev) => ({ ...prev, [name]: nextValue }));
   };
 
   const handleChildChange = (index: number, field: keyof ChildLink, value: string) => {
@@ -249,6 +284,18 @@ export default function ProfileSettings() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!/^09\d{9}$/.test(formData.contactNumber)) {
+      setFeedback({ isOpen: true, title: "Invalid Contact", message: "Phone number must be 11 digits and start with 09.", type: "error" });
+      return;
+    }
+    if (!emailPattern.test(formData.email)) {
+      setFeedback({ isOpen: true, title: "Invalid Email", message: "Please keep a valid registered email address.", type: "error" });
+      return;
+    }
+    if (!addressDetails.street.trim() || !addressDetails.subdivision.trim()) {
+      setFeedback({ isOpen: true, title: "Address Required", message: "Please complete your Mambog II street and subdivision/compound/purok.", type: "error" });
+      return;
+    }
     if (formData.newPassword && formData.newPassword !== formData.confirmNewPassword) {
       setFeedback({ isOpen: true, title: "Password Mismatch", message: "New password and confirm password do not match.", type: "error" });
       return;
@@ -306,7 +353,18 @@ export default function ProfileSettings() {
           civilStatus: formData.civilStatus,
           marriageContractImage: formData.marriageContractImage,
           preferredContactMethod: "Email",
-          addressDetails,
+          addressDetails: {
+            ...addressDetails,
+            blk: stripAddressPrefix(addressDetails.blk, "blk"),
+            lot: stripAddressPrefix(addressDetails.lot, "lot"),
+            street: cleanAddressValue(addressDetails.street),
+            subdivision: cleanAddressValue(addressDetails.subdivision),
+            barangay: "Mambog II",
+            city: "Bacoor",
+            province: "Cavite",
+            zipCode: "4102",
+          },
+          address: composeResidentAddress(addressDetails),
           children,
           ...(formData.newPassword ? { password: formData.newPassword, passwordOtp } : {}),
         },
@@ -383,6 +441,23 @@ export default function ProfileSettings() {
 
   const recentActivities = activities.slice(0, 3);
   const hiddenCount = Math.max(0, activities.length - 3);
+  const filteredActivities = useMemo(() => {
+    const query = activitySearch.trim().toLowerCase();
+    return activities.filter((activity) => {
+      const date = new Date(activity.createdAt);
+      const localDate = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("en-CA");
+      const localTime = Number.isNaN(date.getTime()) ? "" : date.toTimeString().slice(0, 5);
+      const matchesSearch = !query || [
+        activity.title,
+        activity.referenceNo,
+        activity.type,
+        activityStatusLabel(activity),
+      ].some((value) => String(value || "").toLowerCase().includes(query));
+      const matchesDate = !activityDateFilter || localDate === activityDateFilter;
+      const matchesTime = !activityTimeFilter || localTime === activityTimeFilter;
+      return matchesSearch && matchesDate && matchesTime;
+    });
+  }, [activities, activityDateFilter, activitySearch, activityTimeFilter]);
   const isChildSession = Boolean(actingChild);
 
   const handleChildSessionRequestOtp = async () => {
@@ -551,7 +626,7 @@ export default function ProfileSettings() {
                       </div>
                       <div className="space-y-1.5">
                         <label className="block text-xs font-bold text-gray-800">Contact Number</label>
-                        <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" name="contactNumber" value={formData.contactNumber} onChange={handleInputChange} />
+                        <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" type="tel" inputMode="numeric" pattern="09[0-9]{9}" maxLength={11} autoComplete="tel" name="contactNumber" value={formData.contactNumber} onChange={handleInputChange} />
                       </div>
                       <div className="space-y-1.5">
                         <label className="block text-xs font-bold text-gray-800">Preferred Updates</label>
@@ -599,13 +674,25 @@ export default function ProfileSettings() {
                   <h2 className="text-sm font-bold text-[#1e3a8a]">Address</h2>
                   <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
                     <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-gray-800">Street</label>
-                      <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" name="street" value={addressDetails.street} onChange={handleAddressChange} />
+                      <label className="block text-xs font-bold text-gray-800">Block / Phase</label>
+                      <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" name="blk" placeholder="Example: 12 or Phase 2" value={addressDetails.blk} onChange={handleAddressChange} />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-gray-800">Comp/Subd (Optional)</label>
-                      <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" name="subdivision" value={addressDetails.subdivision} onChange={handleAddressChange} />
+                      <label className="block text-xs font-bold text-gray-800">Lot / House No.</label>
+                      <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" name="lot" placeholder="Example: 8 or 24-A" value={addressDetails.lot} onChange={handleAddressChange} />
                     </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-gray-800">Street</label>
+                      <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" name="street" placeholder="Street / road in Mambog II" value={addressDetails.street} onChange={handleAddressChange} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-gray-800">Subdivision / Compound / Purok</label>
+                      <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" name="subdivision" placeholder="Example: Green Plain, Villa Isabel" value={addressDetails.subdivision} onChange={handleAddressChange} />
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                    <span className="font-bold">Formal address preview:</span> {composeResidentAddress(addressDetails) || "Complete your address details."}
                   </div>
 
                   <div className="grid grid-cols-1 gap-5 md:grid-cols-4">
@@ -746,7 +833,13 @@ export default function ProfileSettings() {
                 <div className="flex items-center gap-2 text-[20px] font-bold text-[#1e3a8a]">
                   <Clock size={24} /> My Activity
                 </div>
-                <div className="rounded-full bg-blue-50 px-3 py-1 text-[12px] font-semibold text-[#1e3a8a]">Recent</div>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-[12px] font-semibold text-[#1e3a8a] transition hover:bg-blue-100"
+                  onClick={() => setShowAllActivities(true)}
+                >
+                  View
+                </button>
               </div>
 
               <div className="mb-4 w-full border-b border-gray-100" />
@@ -792,21 +885,74 @@ export default function ProfileSettings() {
 
       {showAllActivities && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6">
+          <div className="max-h-[88vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-slate-900">Recent Activities</h3>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-500">Resident Records</p>
+                <h3 className="text-xl font-bold text-slate-900">My Activity History</h3>
+              </div>
               <button type="button" onClick={() => setShowAllActivities(false)}>
                 <X size={18} />
               </button>
             </div>
-            <div className="space-y-3">
-              {activities.map((activity) => (
-                <div key={activity._id} className="rounded-xl border border-slate-200 p-3 text-sm">
-                  <p className="font-semibold text-slate-900">{activity.title}</p>
-                  <p className="text-xs text-slate-500">{activity.referenceNo || activity.type}</p>
-                  <p className="text-xs text-slate-400">{new Date(activity.createdAt).toLocaleString()}</p>
-                </div>
-              ))}
+            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr,auto,auto]">
+              <div className="relative">
+                <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={activitySearch}
+                  onChange={(e) => setActivitySearch(e.target.value)}
+                  placeholder="Search activity, reference, or status..."
+                  className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400"
+                />
+              </div>
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">
+                <Filter size={14} />
+                <input type="date" value={activityDateFilter} onChange={(e) => setActivityDateFilter(e.target.value)} className="bg-transparent outline-none" />
+              </label>
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">
+                <Clock size={14} />
+                <input type="time" value={activityTimeFilter} onChange={(e) => setActivityTimeFilter(e.target.value)} className="bg-transparent outline-none" />
+              </label>
+              {(activitySearch || activityDateFilter || activityTimeFilter) && (
+                <button
+                  type="button"
+                  onClick={() => { setActivitySearch(""); setActivityDateFilter(""); setActivityTimeFilter(""); }}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 md:col-span-3"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Name</th>
+                    <th className="px-4 py-3 font-semibold">Date</th>
+                    <th className="px-4 py-3 font-semibold">Time</th>
+                    <th className="px-4 py-3 font-semibold">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredActivities.map((activity) => {
+                    const date = new Date(activity.createdAt);
+                    return (
+                      <tr key={activity._id} className="border-t border-slate-200 align-top">
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-slate-900">{activity.title}</p>
+                          <p className="text-xs text-slate-500">{activity.referenceNo || activity.type}</p>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{Number.isNaN(date.getTime()) ? "N/A" : date.toLocaleDateString()}</td>
+                        <td className="px-4 py-3 text-slate-600">{Number.isNaN(date.getTime()) ? "N/A" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
+                        <td className="px-4 py-3">
+                          <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">{activityStatusLabel(activity)}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {filteredActivities.length === 0 && <p className="p-5 text-sm text-slate-500">No activity matched the selected filters.</p>}
             </div>
           </div>
         </div>

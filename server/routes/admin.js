@@ -107,7 +107,11 @@ async function getOrCreateSettings() {
 
 function composeUserAddress(addressDetails, fallback = '') {
   const details = addressDetails || {};
+  const block = String(details.blk || '').trim().replace(/^blk\.?\s*/i, '');
+  const lot = String(details.lot || '').trim().replace(/^lot\.?\s*/i, '');
   const parts = [
+    block ? `Blk ${block}` : '',
+    lot ? `Lot ${lot}` : '',
     details.street,
     details.subdivision,
     details.barangay || 'Mambog II',
@@ -115,7 +119,7 @@ function composeUserAddress(addressDetails, fallback = '') {
     details.province || 'Cavite',
     details.zipCode || '4102',
   ].map((item) => String(item || '').trim()).filter(Boolean);
-  return fallback || parts.join(', ');
+  return parts.join(', ') || fallback;
 }
 
 function buildUserFields(body, { includePassword = false } = {}) {
@@ -142,8 +146,8 @@ function buildUserFields(body, { includePassword = false } = {}) {
   });
   if (body.addressDetails !== undefined) {
     fields.addressDetails = {
-      blk: String(body.addressDetails?.blk || ''),
-      lot: String(body.addressDetails?.lot || ''),
+      blk: String(body.addressDetails?.blk || '').trim().replace(/^blk\.?\s*/i, ''),
+      lot: String(body.addressDetails?.lot || '').trim().replace(/^lot\.?\s*/i, ''),
       street: String(body.addressDetails?.street || ''),
       subdivision: String(body.addressDetails?.subdivision || ''),
       barangay: 'Mambog II',

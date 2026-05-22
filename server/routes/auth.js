@@ -21,6 +21,8 @@ const ALLOWED_SUBDIVISIONS = [
   'villa isabel',
   'camella',
   'soldiers hills',
+  'green plain',
+  'greenplain',
   'green valley',
   'molino',
   'mambog',
@@ -56,7 +58,11 @@ function composeAddress(addressDetails) {
     province: 'Cavite',
     zipCode: '4102',
   };
+  const block = String(normalized.blk || '').trim().replace(/^blk\.?\s*/i, '');
+  const lot = String(normalized.lot || '').trim().replace(/^lot\.?\s*/i, '');
   const parts = [
+    block ? `Blk ${block}` : '',
+    lot ? `Lot ${lot}` : '',
     normalized.street || '',
     normalized.subdivision || '',
     normalized.barangay || '',
@@ -69,8 +75,8 @@ function composeAddress(addressDetails) {
 
 function normalizeAddressDetails(addressDetails) {
   return {
-    blk: '',
-    lot: '',
+    blk: String(addressDetails?.blk || '').trim().replace(/^blk\.?\s*/i, ''),
+    lot: String(addressDetails?.lot || '').trim().replace(/^lot\.?\s*/i, ''),
     street: String(addressDetails?.street || '').trim(),
     subdivision: String(addressDetails?.subdivision || '').trim(),
     barangay: 'Mambog II',

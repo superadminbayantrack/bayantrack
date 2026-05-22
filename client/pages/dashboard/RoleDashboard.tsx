@@ -1,7 +1,7 @@
 ﻿
 import { useEffect, useMemo, useRef, useState, type Dispatch, type MouseEvent as ReactMouseEvent, type ReactNode, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, MapPin, MessageCircle, Paperclip, Pencil, RotateCcw, Search, Settings, Star, Trash2, UserCog, UserX, Users, X } from "lucide-react";
+import { AlertTriangle, Archive, Bell, Building2, Check, ChevronDown, CircleUserRound, ClipboardCheck, Eye, EyeOff, FileText, LayoutDashboard, LogOut, Mail, MapPin, MessageCircle, MoreHorizontal, Paperclip, Pencil, RotateCcw, Search, Settings, Star, Trash2, UserCog, UserX, Users, X } from "lucide-react";
 import { clearAuthSession, type UserRole } from "@/lib/auth";
 import { api, authHeaders } from "@/lib/api";
 import { LogoutConfirmation } from "@/components/LogoutConfirmation";
@@ -11,7 +11,9 @@ interface DashboardProps { role: UserRole; }
 type Panel = "overview" | "users" | "officials" | "announcements" | "reports" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "restore" | "settings" | "notifications" | "audit";
 type FilterPanel = "users" | "announcements" | "reports" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "audit";
 type MonthlyDetailKind = "users" | "services" | "reports" | "messages";
+type RatingRange = "days" | "weeks" | "months" | "years";
 type TableFilterState = { search: string; date: string; time: string };
+type MobileDashboardAction = { label: string; run: () => void; tone?: "default" | "danger" };
 type PermissionFlags = { view: boolean; add: boolean; edit: boolean; archive: boolean; delete: boolean };
 type AdminPermissions = {
   officials: PermissionFlags;
@@ -481,6 +483,34 @@ function AdminCommentBlock({ value }: { value?: string }) {
   );
 }
 
+function formatUserAddressBreakdown(details?: UserItem["addressDetails"]) {
+  if (!details) return "";
+  const block = String(details.blk || "").trim().replace(/^blk\.?\s*/i, "");
+  const lot = String(details.lot || "").trim().replace(/^lot\.?\s*/i, "");
+  return [
+    block ? `Blk ${block}` : "",
+    lot ? `Lot ${lot}` : "",
+    details.street,
+    details.subdivision,
+    details.barangay || "Mambog II",
+    details.city || "Bacoor",
+    details.province || "Cavite",
+    details.zipCode || "4102",
+  ].map((item) => String(item || "").trim()).filter(Boolean).join(", ");
+}
+
+function ratingBucketLabel(value: string | undefined | null, range: RatingRange) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  if (range === "years") return String(date.getFullYear());
+  if (range === "months") return date.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+  if (range === "weeks") {
+    const week = Math.ceil(date.getDate() / 7);
+    return `${date.toLocaleDateString(undefined, { month: "short" })} W${week}`;
+  }
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export default function RoleDashboard({ role }: DashboardProps) {
   const navigate = useNavigate();
   const canManage = role === "superadmin";
@@ -575,6 +605,9 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [liveAlertCategory, setLiveAlertCategory] = useState<"unresolved" | "resolved" | "all">("unresolved");
   const [notificationCategory, setNotificationCategory] = useState("all");
   const [monthlyDetailModal, setMonthlyDetailModal] = useState<MonthlyDetailKind | null>(null);
+  const [ratingDetailOpen, setRatingDetailOpen] = useState(false);
+  const [ratingRange, setRatingRange] = useState<RatingRange>("days");
+  const [mobileActionMenu, setMobileActionMenu] = useState<{ title: string; actions: MobileDashboardAction[] } | null>(null);
   const [restoreCategory, setRestoreCategory] = useState("users");
   const [reportSortOrder, setReportSortOrder] = useState<"newest" | "oldest">("newest");
   const [serviceSortOrder, setServiceSortOrder] = useState<"newest" | "oldest">("newest");
@@ -743,6 +776,28 @@ export default function RoleDashboard({ role }: DashboardProps) {
       comments: rated.filter((alert) => alert.residentRatingComment).slice(0, 3),
     };
   }, [emergencyAlerts]);
+
+  const alertRatingDetails = useMemo(() => (
+    emergencyAlerts
+      .filter((alert) => Number(alert.residentRating) > 0)
+      .sort((a, b) => new Date(b.residentRatedAt || b.updatedAt || b.createdAt || 0).getTime() - new Date(a.residentRatedAt || a.updatedAt || a.createdAt || 0).getTime())
+  ), [emergencyAlerts]);
+
+  const alertRatingChartData = useMemo(() => {
+    const grouped = new Map<string, { total: number; count: number }>();
+    alertRatingDetails.forEach((alert) => {
+      const key = ratingBucketLabel(alert.residentRatedAt || alert.updatedAt || alert.createdAt, ratingRange);
+      const current = grouped.get(key) || { total: 0, count: 0 };
+      current.total += Number(alert.residentRating || 0);
+      current.count += 1;
+      grouped.set(key, current);
+    });
+    return Array.from(grouped.entries()).map(([label, item]) => ({
+      label,
+      count: item.count,
+      average: item.count ? item.total / item.count : 0,
+    })).slice(-8);
+  }, [alertRatingDetails, ratingRange]);
 
   const recentActivityDetails = useMemo(() => activities.slice(0, 5), [activities]);
 
@@ -1779,6 +1834,24 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const sectionCard = "rounded-xl border border-slate-200 bg-slate-50/70 p-3";
   const moduleGrid = "grid gap-3 sm:grid-cols-2 xl:grid-cols-3";
   const moduleCard = "rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm transition hover:border-slate-300 hover:shadow-md";
+  const renderActionControls = (title: string, desktopActions: ReactNode, actions: Array<MobileDashboardAction | null | false | undefined>) => {
+    const availableActions = actions.filter(Boolean) as MobileDashboardAction[];
+    if (availableActions.length === 0) return null;
+    return (
+      <>
+        <div className="hidden flex-wrap gap-2 sm:flex">{desktopActions}</div>
+        <button
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50 sm:hidden"
+          onClick={() => setMobileActionMenu({ title, actions: availableActions })}
+          type="button"
+          aria-label={`Open actions for ${title}`}
+          title="More actions"
+        >
+          <MoreHorizontal size={18} />
+        </button>
+      </>
+    );
+  };
 
   const handlerOptions = useMemo<HandlerOption[]>(() => {
     const userFullName = (user: UserItem) =>
@@ -2166,12 +2239,15 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     <span className="ml-2 text-xs font-semibold text-slate-500">{alertRatingSummary.count} rated alert{alertRatingSummary.count === 1 ? "" : "s"}</span>
                   </div>
                   <div className="mt-4 space-y-2">
-                    {alertRatingSummary.comments.length === 0 ? <p className="text-xs text-slate-500">No rating comments yet.</p> : alertRatingSummary.comments.map((alert) => (
+                    {alertRatingSummary.comments.length === 0 ? <p className="text-xs text-slate-500">No rating comments yet.</p> : alertRatingSummary.comments.slice(0, 2).map((alert) => (
                       <div key={alert._id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
                         <p className="font-bold text-slate-900">{alert.referenceNo} - {alert.residentRating}/5</p>
                         <p className="mt-1 text-slate-600">{alert.residentRatingComment}</p>
                       </div>
                     ))}
+                    <button className={btnSecondary} onClick={() => setRatingDetailOpen(true)} type="button">
+                      View All Ratings
+                    </button>
                   </div>
                 </section>
                 <section className={card}>
@@ -2279,7 +2355,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <td className="px-4 py-3"><Badge value={user.role} /></td>
                         <td className="px-4 py-3"><Badge value={user.status === "active" ? "approved" : user.status === "suspended" ? "rejected" : "pending"} /></td>
                         <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-2">
+                          {renderActionControls(`User ${user.username}`, (
+                          <>
                             <button className={btnSecondary} onClick={() => void openSelectedUser(user)} type="button">View Details</button>
                             {canManage && (
                               <button className={btnSecondary} onClick={() => setUserEditModal({ ...user, password: "" })} type="button">Edit</button>
@@ -2305,7 +2382,23 @@ export default function RoleDashboard({ role }: DashboardProps) {
                             {canManage && !(user.role === "superadmin" && user.username === "superAdmin123") && (
                               <button className={btnDanger} onClick={() => setPendingAction({ title: "Delete Permanently", message: `Delete ${user.username} and linked records?`, confirmLabel: "Delete", run: () => deleteUserAccount(user._id) })} type="button">Delete</button>
                             )}
-                          </div>
+                          </>
+                          ), [
+                            { label: "View Details", run: () => void openSelectedUser(user) },
+                            canManage && { label: "Edit", run: () => setUserEditModal({ ...user, password: "" }) },
+                            canManage && !(user.role === "superadmin" && user.username === "superAdmin123") && {
+                              label: user.status === "suspended" ? "Activate" : "Archive",
+                              run: () => setPendingAction({
+                                title: user.status === "suspended" ? "Activate User" : "Archive User",
+                                message: `${user.status === "suspended" ? "Activate" : "Archive"} ${user.username}?`,
+                                confirmLabel: user.status === "suspended" ? "Activate" : "Archive",
+                                run: () => user.status === "suspended"
+                                  ? runActionWithFeedback("User status updated", () => api.patch(`/api/admin/users/${user._id}/status`, { status: "active", validIdStatus: "approved" }, { headers: authHeaders() }))
+                                  : Promise.resolve(openUserReasonPrompt({ kind: "user-status", title: "Archive User", userId: user._id, username: user.username, nextStatus: "suspended", validIdStatus: "rejected", role: user.role })),
+                              }),
+                            },
+                            canManage && !(user.role === "superadmin" && user.username === "superAdmin123") && { label: "Delete", tone: "danger", run: () => setPendingAction({ title: "Delete Permanently", message: `Delete ${user.username} and linked records?`, confirmLabel: "Delete", run: () => deleteUserAccount(user._id) }) },
+                          ])}
                         </td>
                       </tr>
                     ))}
@@ -2352,7 +2445,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <td className="px-4 py-3"><Badge value={o.level} /></td>
                         <td className="px-4 py-3 text-slate-700">{o.committee || "N/A"}</td>
                         <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-2">
+                          {renderActionControls(`Official ${o.name}`, (
+                          <>
                             {hasModulePermission("officials", "edit") && <button className={btnSecondary} onClick={() => setOfficialEditModal(o)} type="button">Edit</button>}
                             {hasModulePermission("officials", "archive") && (
                               <button
@@ -2366,7 +2460,12 @@ export default function RoleDashboard({ role }: DashboardProps) {
                               </button>
                             )}
                             {hasModulePermission("officials", "delete") && <button className={btnDanger} onClick={() => setPendingAction({ title: "Delete Official", message: `Delete ${o.name}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Official removed", () => api.delete(`/api/officials/${o._id}`, { headers: authHeaders() })) })} type="button">Delete</button>}
-                          </div>
+                          </>
+                          ), [
+                            hasModulePermission("officials", "edit") && { label: "Edit", run: () => setOfficialEditModal(o) },
+                            hasModulePermission("officials", "archive") && { label: o.active === false ? "Activate" : "Archive", run: () => setPendingAction({ title: o.active === false ? "Activate Official" : "Archive Official", message: `${o.active === false ? "Activate" : "Archive"} ${o.name}?`, confirmLabel: "Confirm", run: () => runActionWithFeedback("Official updated", () => api.put(`/api/officials/${o._id}`, { ...o, active: o.active === false }, { headers: authHeaders() })) }) },
+                            hasModulePermission("officials", "delete") && { label: "Delete", tone: "danger", run: () => setPendingAction({ title: "Delete Official", message: `Delete ${o.name}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Official removed", () => api.delete(`/api/officials/${o._id}`, { headers: authHeaders() })) }) },
+                          ])}
                         </td>
                       </tr>
                     ))}
@@ -2418,7 +2517,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <td className="px-4 py-3 text-[13px] leading-5 text-slate-700 break-words">{a.category}</td>
                         <td className="px-4 py-3 align-middle"><div className="w-fit"><Badge value={a.archived ? "archived" : "active"} /></div></td>
                         <td className="px-4 py-3">
-                          <div className="flex flex-nowrap items-center gap-2">
+                          {renderActionControls(`Announcement ${a.title}`, (
+                          <>
                             {hasModulePermission("announcements", "edit") && (
                               <button className={iconBtn} onClick={() => setAnnouncementEditModal(a)} type="button" title="Edit announcement" aria-label="Edit announcement">
                                 <Pencil size={16} />
@@ -2446,7 +2546,12 @@ export default function RoleDashboard({ role }: DashboardProps) {
                                 <Trash2 size={16} />
                               </button>
                             )}
-                          </div>
+                          </>
+                          ), [
+                            hasModulePermission("announcements", "edit") && { label: "Edit", run: () => setAnnouncementEditModal(a) },
+                            hasModulePermission("announcements", "archive") && { label: a.archived ? "Activate" : "Archive", run: () => setPendingAction({ title: a.archived ? "Activate Announcement" : "Archive Announcement", message: `${a.archived ? "Activate" : "Archive"} ${a.title}?`, confirmLabel: "Confirm", run: () => runActionWithFeedback("Announcement updated", () => api.patch(`/api/announcements/${a._id}/archive`, { archived: !a.archived }, { headers: authHeaders() })) }) },
+                            hasModulePermission("announcements", "delete") && { label: "Delete", tone: "danger", run: () => setPendingAction({ title: "Delete Announcement", message: `Delete ${a.title}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Announcement deleted", () => api.delete(`/api/announcements/${a._id}`, { headers: authHeaders() })) }) },
+                          ])}
                         </td>
                       </tr>
                     ))}
@@ -2512,7 +2617,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         </td>
                         <td className="px-4 py-3"><Badge value={r.status} /></td>
                         <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-2">
+                          {renderActionControls(`Report ${r.referenceNo}`, (
+                          <>
                             {hasModulePermission("reports", "edit") ? <button className={btnSecondary} onClick={() => void openReportManageModal(r)} type="button">Manage</button> : null}
                             {hasModulePermission("reports", "archive") ? (
                               <button
@@ -2526,7 +2632,12 @@ export default function RoleDashboard({ role }: DashboardProps) {
                               </button>
                             ) : null}
                             {hasModulePermission("reports", "delete") ? <button className={btnDanger} onClick={() => setPendingAction({ title: "Delete Report", message: `Delete ${r.referenceNo}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Report deleted", () => api.delete(`/api/reports/${r._id}`, { headers: authHeaders() })) })} type="button">Delete</button> : null}
-                          </div>
+                          </>
+                          ), [
+                            hasModulePermission("reports", "edit") && { label: "Manage", run: () => void openReportManageModal(r) },
+                            hasModulePermission("reports", "archive") && { label: "Archive", run: () => setPendingAction({ title: "Archive Report", message: `Archive ${r.referenceNo}?`, confirmLabel: "Archive", run: () => runActionWithFeedback("Report archived", () => api.patch(`/api/reports/${r._id}/status`, { status: "rejected", adminChecked: true }, { headers: authHeaders() })) }) },
+                            hasModulePermission("reports", "delete") && { label: "Delete", tone: "danger", run: () => setPendingAction({ title: "Delete Report", message: `Delete ${r.referenceNo}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Report deleted", () => api.delete(`/api/reports/${r._id}`, { headers: authHeaders() })) }) },
+                          ])}
                         </td>
                       </tr>
                     ))}
@@ -2634,7 +2745,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
                             </div>
                           </td>
                           <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-2">
+                            {renderActionControls(`Live alert ${alert.referenceNo}`, (
+                            <>
                               <button className={btnSecondary} onClick={() => void openLiveAlertChat(alert)} type="button">
                                 <MessageCircle size={14} className="mr-1" /> Live Chat
                               </button>
@@ -2674,7 +2786,14 @@ export default function RoleDashboard({ role }: DashboardProps) {
                               >
                                 <Trash2 size={16} />
                               </button>
-                            </div>
+                            </>
+                            ), [
+                              { label: "Live Chat", run: () => void openLiveAlertChat(alert) },
+                              alert.status === "active" && { label: "Acknowledge", run: () => setPendingAction({ title: "Acknowledge Live Alert", message: `Mark ${alert.referenceNo} as acknowledged?`, confirmLabel: "Acknowledge", run: () => runActionWithFeedback("Live alert acknowledged", () => api.patch(`/api/emergency-alerts/${alert._id}/status`, { status: "acknowledged" }, { headers: authHeaders() })) }) },
+                              alert.status !== "resolved" && alert.status !== "cancelled" && { label: "Resolve", run: () => setPendingAction({ title: "End Live Chat", message: `Mark ${alert.referenceNo} as resolved and end the live chat?`, confirmLabel: "End Chat", run: () => endLiveAlertChat(alert) }) },
+                              { label: "Archive", run: () => setPendingAction({ title: "Archive Live Alert", message: `Archive ${alert.referenceNo}? It will be hidden from the daily list.`, confirmLabel: "Archive", run: () => runActionWithFeedback("Live alert archived", () => api.patch(`/api/emergency-alerts/${alert._id}/archive`, { archived: true }, { headers: authHeaders() })) }) },
+                              { label: "Delete", tone: "danger", run: () => setPendingAction({ title: "Delete Live Alert", message: `Permanently delete ${alert.referenceNo}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Live alert deleted", () => api.delete(`/api/emergency-alerts/${alert._id}`, { headers: authHeaders() })) }) },
+                            ])}
                           </td>
                         </tr>
                       );
@@ -2730,7 +2849,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         </td>
                         <td className="px-4 py-3"><Badge value={s.status} /></td>
                         <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-2">
+                          {renderActionControls(`Service request ${s.referenceNo}`, (
+                          <>
                             {hasModulePermission("serviceRequests", "edit") ? <button className={btnSecondary} onClick={() => setServiceManageModal(s)} type="button">Manage</button> : null}
                             {hasModulePermission("serviceRequests", "archive") ? (
                               <button
@@ -2744,7 +2864,12 @@ export default function RoleDashboard({ role }: DashboardProps) {
                               </button>
                             ) : null}
                             {hasModulePermission("serviceRequests", "delete") ? <button className={btnDanger} onClick={() => setPendingAction({ title: "Delete Service Request", message: `Delete ${s.referenceNo}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Service request deleted", () => api.delete(`/api/services/requests/${s._id}`, { headers: authHeaders() })) })} type="button">Delete</button> : null}
-                          </div>
+                          </>
+                          ), [
+                            hasModulePermission("serviceRequests", "edit") && { label: "Manage", run: () => setServiceManageModal(s) },
+                            hasModulePermission("serviceRequests", "archive") && { label: "Archive", run: () => setPendingAction({ title: "Archive Service Request", message: `Archive ${s.referenceNo}?`, confirmLabel: "Archive", run: () => runActionWithFeedback("Service request archived", () => api.patch(`/api/services/requests/${s._id}/status`, { status: "rejected", note: "Archived by barangay staff" }, { headers: authHeaders() })) }) },
+                            hasModulePermission("serviceRequests", "delete") && { label: "Delete", tone: "danger", run: () => setPendingAction({ title: "Delete Service Request", message: `Delete ${s.referenceNo}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Service request deleted", () => api.delete(`/api/services/requests/${s._id}`, { headers: authHeaders() })) }) },
+                          ])}
                         </td>
                       </tr>
                     ))}
@@ -2792,7 +2917,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <td className="px-4 py-3 text-slate-600">{m.department}</td>
                         <td className="px-4 py-3"><Badge value={m.status} /></td>
                         <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-2">
+                          {renderActionControls(`Message ${m.referenceNo}`, (
+                          <>
                             {hasModulePermission("messages", "edit") ? <button className={btnSecondary} onClick={() => setMessageManageModal(m)} type="button">Manage</button> : null}
                             {hasModulePermission("messages", "archive") ? (
                               <button
@@ -2806,7 +2932,12 @@ export default function RoleDashboard({ role }: DashboardProps) {
                               </button>
                             ) : null}
                             {hasModulePermission("messages", "delete") ? <button className={btnDanger} onClick={() => setPendingAction({ title: "Delete Message", message: `Delete ${m.referenceNo}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Message deleted", () => api.delete(`/api/contact/messages/${m._id}`, { headers: authHeaders() })) })} type="button">Delete</button> : null}
-                          </div>
+                          </>
+                          ), [
+                            hasModulePermission("messages", "edit") && { label: "Manage", run: () => setMessageManageModal(m) },
+                            hasModulePermission("messages", "archive") && { label: "Archive", run: () => setPendingAction({ title: "Archive Message", message: `Archive ${m.referenceNo}?`, confirmLabel: "Archive", run: () => runActionWithFeedback("Message archived", () => api.patch(`/api/contact/messages/${m._id}/status`, { status: "closed" }, { headers: authHeaders() })) }) },
+                            hasModulePermission("messages", "delete") && { label: "Delete", tone: "danger", run: () => setPendingAction({ title: "Delete Message", message: `Delete ${m.referenceNo}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Message deleted", () => api.delete(`/api/contact/messages/${m._id}`, { headers: authHeaders() })) }) },
+                          ])}
                         </td>
                       </tr>
                     ))}
@@ -2856,7 +2987,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <td className="px-4 py-3 text-slate-600">{sub.source || "homepage"}</td>
                         <td className="px-4 py-3"><Badge value={sub.status} /></td>
                         <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-2">
+                          {renderActionControls(`Subscriber ${sub.email}`, (
+                          <>
                             {hasModulePermission("subscribers", "edit") ? <button className={btnSecondary} onClick={() => setSubscriptionManageModal(sub)} type="button">Manage</button> : null}
                             {hasModulePermission("subscribers", "archive") ? (
                               <button
@@ -2870,7 +3002,12 @@ export default function RoleDashboard({ role }: DashboardProps) {
                               </button>
                             ) : null}
                             {hasModulePermission("subscribers", "delete") ? <button className={btnDanger} onClick={() => setPendingAction({ title: "Delete Subscriber", message: `Delete ${sub.email}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Subscriber deleted", () => api.delete(`/api/subscriptions/${sub._id}`, { headers: authHeaders() })) })} type="button">Delete</button> : null}
-                          </div>
+                          </>
+                          ), [
+                            hasModulePermission("subscribers", "edit") && { label: "Manage", run: () => setSubscriptionManageModal(sub) },
+                            hasModulePermission("subscribers", "archive") && { label: sub.status === "unsubscribed" ? "Activate" : "Archive", run: () => setPendingAction({ title: sub.status === "unsubscribed" ? "Activate Subscriber" : "Archive Subscriber", message: `${sub.status === "unsubscribed" ? "Activate" : "Archive"} ${sub.email}?`, confirmLabel: "Confirm", run: () => runActionWithFeedback("Subscriber updated", () => api.patch(`/api/subscriptions/${sub._id}/status`, { status: sub.status === "unsubscribed" ? "active" : "unsubscribed" }, { headers: authHeaders() })) }) },
+                            hasModulePermission("subscribers", "delete") && { label: "Delete", tone: "danger", run: () => setPendingAction({ title: "Delete Subscriber", message: `Delete ${sub.email}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Subscriber deleted", () => api.delete(`/api/subscriptions/${sub._id}`, { headers: authHeaders() })) }) },
+                          ])}
                         </td>
                       </tr>
                     ))}
@@ -3338,7 +3475,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     <div className="space-y-1 text-slate-700">
                       <p><span className="font-semibold">Full Address:</span> {selectedUser.address || "N/A"}</p>
                       {selectedUser.addressDetails && (
-                        <p><span className="font-semibold">Breakdown:</span> {`Blk ${selectedUser.addressDetails.blk || "-"}, Lot ${selectedUser.addressDetails.lot || "-"}, ${selectedUser.addressDetails.street || "-"}, ${selectedUser.addressDetails.subdivision || "-"}, ${selectedUser.addressDetails.barangay || "-"}, ${selectedUser.addressDetails.city || "-"}, ${selectedUser.addressDetails.province || "-"}, ${selectedUser.addressDetails.zipCode || "-"}`}</p>
+                        <p><span className="font-semibold">Breakdown:</span> {formatUserAddressBreakdown(selectedUser.addressDetails) || "N/A"}</p>
                       )}
                     </div>
                   </div>
@@ -4547,6 +4684,104 @@ export default function RoleDashboard({ role }: DashboardProps) {
           </div>
         );
       })()}
+
+      {ratingDetailOpen && (
+        <div className={modalOverlay}>
+          <div className={`${modalCard} max-w-6xl`}>
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-amber-600">Resident feedback</p>
+                <h3 className="mt-1 text-xl font-bold text-slate-900">Live Chat Help Rating</h3>
+                <p className="mt-1 text-sm text-slate-500">Ratings and comments from resolved live emergency chats.</p>
+              </div>
+              <button className={iconBtn} onClick={() => setRatingDetailOpen(false)} type="button" title="Close ratings" aria-label="Close ratings"><X size={18} /></button>
+            </div>
+            <div className="mb-4 flex flex-wrap gap-2">
+              {(["days", "weeks", "months", "years"] as RatingRange[]).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => setRatingRange(item)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-bold capitalize transition ${ratingRange === item ? "border-amber-500 bg-amber-500 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+            <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+              {alertRatingChartData.length === 0 ? (
+                <p className="text-sm text-slate-500">No rating data yet.</p>
+              ) : (
+                <div className="flex h-52 items-end gap-3">
+                  {alertRatingChartData.map((item) => (
+                    <div key={item.label} className="flex flex-1 flex-col items-center gap-2">
+                      <div className="flex h-40 w-full items-end rounded-xl bg-white/80 px-2 pt-2">
+                        <div className="w-full rounded-t-lg bg-amber-500 shadow-sm transition-all duration-300 ease-out" style={{ height: `${Math.max(8, Math.round((item.average / 5) * 100))}%` }} />
+                      </div>
+                      <span className="text-center text-[11px] font-bold text-slate-600">{item.label}</span>
+                      <span className="text-[11px] text-slate-500">{item.average.toFixed(1)} ({item.count})</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Alert</th>
+                    <th className="px-4 py-3 font-semibold">Resident</th>
+                    <th className="px-4 py-3 font-semibold">Rating</th>
+                    <th className="px-4 py-3 font-semibold">Comment</th>
+                    <th className="px-4 py-3 font-semibold">Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alertRatingDetails.map((alert) => (
+                    <tr key={alert._id} className="border-t border-slate-200 align-top">
+                      <td className="px-4 py-3 font-semibold text-slate-900">{alert.referenceNo}</td>
+                      <td className="px-4 py-3 text-slate-600">{alert.residentSnapshot?.fullName || alert.residentSnapshot?.username || "Resident"}</td>
+                      <td className="px-4 py-3"><span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700">{alert.residentRating}/5</span></td>
+                      <td className="px-4 py-3 text-slate-600">{alert.residentRatingComment || "No comment"}</td>
+                      <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(alert.residentRatedAt || alert.updatedAt || alert.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {alertRatingDetails.length === 0 && <p className="p-5 text-sm text-slate-500">No resident feedback yet.</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mobileActionMenu && (
+        <div className={modalOverlay}>
+          <div className={`${modalCard} max-w-sm`}>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Mobile actions</p>
+                <h3 className="text-lg font-bold text-slate-900">{mobileActionMenu.title}</h3>
+              </div>
+              <button className={iconBtn} onClick={() => setMobileActionMenu(null)} type="button" aria-label="Close actions"><X size={18} /></button>
+            </div>
+            <div className="grid gap-2">
+              {mobileActionMenu.actions.map((action) => (
+                <button
+                  key={action.label}
+                  type="button"
+                  onClick={() => {
+                    setMobileActionMenu(null);
+                    action.run();
+                  }}
+                  className={`rounded-xl border px-4 py-3 text-left text-sm font-bold transition ${action.tone === "danger" ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100" : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"}`}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {feedback && <div className="fixed right-2 top-20 z-50 sm:right-4 sm:top-24"><div className={`rounded-lg border px-4 py-3 text-sm shadow-lg ${feedback.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}><p className="font-semibold">{feedback.title}</p><p>{feedback.message}</p></div></div>}
       {pendingAction && <div className={modalOverlay}><div className={`${modalCard} max-w-lg`}><h3 className="text-lg font-bold text-slate-900">{pendingAction.title}</h3><p className="mt-2 text-sm text-slate-600">{pendingAction.message}</p><div className="mt-6 flex gap-3"><button className={`${btnSecondary} flex-1 text-sm`} onClick={() => setPendingAction(null)} disabled={actionLoading} type="button">Cancel</button><button className={`${btnPrimary} flex-1 text-sm`} onClick={confirmPendingAction} disabled={actionLoading} type="button">{pendingAction.confirmLabel}</button></div></div></div>}

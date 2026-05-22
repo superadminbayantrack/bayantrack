@@ -11,6 +11,36 @@ type ViewState = "login" | "forgot" | "create" | "reset";
 type LiveUpdate = { category: string; text: string; module?: string };
 type OtpLoadingState = { active: boolean; title: string; progress: number };
 
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const digitOnly = (value: string, max = 11) => value.replace(/\D/g, "").slice(0, max);
+const cleanAddressValue = (value: string) => value.replace(/\s+/g, " ").trim();
+const stripAddressPrefix = (value: string, prefix: "blk" | "lot") => (
+  cleanAddressValue(value).replace(new RegExp(`^${prefix}\\.?\\s*`, "i"), "")
+);
+const formatResidentAddress = (details: {
+  blk?: string;
+  lot?: string;
+  street?: string;
+  subdivision?: string;
+  barangay?: string;
+  city?: string;
+  province?: string;
+  zipCode?: string;
+}) => {
+  const block = stripAddressPrefix(details.blk || "", "blk");
+  const lot = stripAddressPrefix(details.lot || "", "lot");
+  return [
+    block ? `Blk ${block}` : "",
+    lot ? `Lot ${lot}` : "",
+    cleanAddressValue(details.street || ""),
+    cleanAddressValue(details.subdivision || ""),
+    "Mambog II",
+    "Bacoor",
+    "Cavite",
+    "4102",
+  ].filter(Boolean).join(", ");
+};
+
 const Login = () => {
   const OTP_REQUEST_TIMEOUT = 20000;
   const navigate = useNavigate();
@@ -118,7 +148,20 @@ const Login = () => {
   };
 
   const handleRegisterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    setRegisterData({ ...registerData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    if (name === "contactNumber") {
+      setRegisterData({ ...registerData, contactNumber: digitOnly(value) });
+      return;
+    }
+    if (["blk", "lot", "street", "subdivision"].includes(name)) {
+      setRegisterData({ ...registerData, [name]: value.replace(/\s{2,}/g, " ") });
+      return;
+    }
+    if (name === "email") {
+      setRegisterData({ ...registerData, email: value.trim().toLowerCase() });
+      return;
+    }
+    setRegisterData({ ...registerData, [name]: value });
   };
 
   const handleIdTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -215,8 +258,12 @@ const Login = () => {
         setFeedback({ isOpen: true, title: "Weak Password", message: "Password must be at least 8 characters with uppercase, lowercase, and 1 special character.", type: "error" });
         return;
       }
-      if (!/^\d{11}$/.test(registerData.contactNumber)) {
-        setFeedback({ isOpen: true, title: "Invalid Contact", message: "Contact number must be exactly 11 digits.", type: "error" });
+      if (!/^09\d{9}$/.test(registerData.contactNumber)) {
+        setFeedback({ isOpen: true, title: "Invalid Contact", message: "Phone number must be 11 digits and start with 09.", type: "error" });
+        return;
+      }
+      if (!emailPattern.test(registerData.email)) {
+        setFeedback({ isOpen: true, title: "Invalid Email", message: "Please enter a valid email address such as name@gmail.com or name@hotmail.com.", type: "error" });
         return;
       }
       if (!registerData.validIdType || !registerData.validIdImage) {
@@ -227,26 +274,31 @@ const Login = () => {
         setFeedback({ isOpen: true, title: "Address Required", message: "Street in Mambog II is required.", type: "error" });
         return;
       }
+      if (!registerData.subdivision.trim()) {
+        setFeedback({ isOpen: true, title: "Address Required", message: "Please enter your subdivision, compound, purok, or landmark in Mambog II.", type: "error" });
+        return;
+      }
       if (sendingRegisterOtp) return;
 
       try {
         setSendingRegisterOtp(true);
         beginOtpLoading("Sending registration OTP");
         const addressDetails = {
-          blk: registerData.blk,
-          lot: registerData.lot,
-          street: registerData.street,
-          subdivision: registerData.subdivision,
+          blk: stripAddressPrefix(registerData.blk, "blk"),
+          lot: stripAddressPrefix(registerData.lot, "lot"),
+          street: cleanAddressValue(registerData.street),
+          subdivision: cleanAddressValue(registerData.subdivision),
           barangay: registerData.barangay,
           city: registerData.city,
           province: registerData.province,
           zipCode: registerData.zipCode,
         };
+        const address = formatResidentAddress(addressDetails);
         await api.post("/api/auth/register/check", {
           username: registerData.username,
           email: registerData.email,
           contactNumber: registerData.contactNumber,
-          address: `${registerData.street}, ${registerData.barangay}, ${registerData.city}, ${registerData.province}`,
+          address,
           addressDetails,
         });
         await api.post("/api/auth/send-otp", { email: registerData.email }, { timeout: OTP_REQUEST_TIMEOUT });
@@ -302,22 +354,27 @@ const Login = () => {
       setFeedback({ isOpen: true, title: "Weak Password", message: "Password must be at least 8 characters with uppercase, lowercase, and 1 special character.", type: "error" });
       return;
     }
+    if (!/^09\d{9}$/.test(registerData.contactNumber) || !emailPattern.test(registerData.email) || !registerData.street.trim() || !registerData.subdivision.trim()) {
+      setFeedback({ isOpen: true, title: "Review Registration", message: "Please complete a valid phone number, email, street, and Mambog II subdivision/compound before verifying.", type: "error" });
+      return;
+    }
     try {
       setVerifyingRegistration(true);
       const addressDetails = {
-        blk: registerData.blk,
-        lot: registerData.lot,
-        street: registerData.street,
-        subdivision: registerData.subdivision,
+        blk: stripAddressPrefix(registerData.blk, "blk"),
+        lot: stripAddressPrefix(registerData.lot, "lot"),
+        street: cleanAddressValue(registerData.street),
+        subdivision: cleanAddressValue(registerData.subdivision),
         barangay: registerData.barangay,
         city: registerData.city,
         province: registerData.province,
         zipCode: registerData.zipCode,
       };
+      const address = formatResidentAddress(addressDetails);
       await api.post("/api/auth/register", {
         ...registerData,
         otp,
-        address: `${registerData.street}, ${registerData.barangay}, ${registerData.city}, ${registerData.province}`,
+        address,
         addressDetails,
       });
       setFeedback({ isOpen: true, title: "Registration Submitted", message: "Thanks for registering. Please wait for the admin to approve your account.", type: "success" });
@@ -512,7 +569,7 @@ const Login = () => {
                   <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 ml-1">Username / Email / Phone</label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"><User size={18} /></span>
-                    <input type="text" required placeholder="Username, Email, Phone, or approved child name/email" name="identifier" value={loginData.identifier} onChange={handleLoginChange} className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 text-sm outline-none transition focus:border-blue-500 focus:bg-white sm:py-4 sm:pl-12" />
+                    <input type="text" required autoComplete="username" placeholder="Username, Email, Phone, or approved child name/email" name="identifier" value={loginData.identifier} onChange={handleLoginChange} className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 text-sm outline-none transition focus:border-blue-500 focus:bg-white sm:py-4 sm:pl-12" />
                   </div>
                 </div>
                 <div className="flex flex-col gap-2">
@@ -650,9 +707,21 @@ const Login = () => {
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Block / Phase</label>
+                    <input type="text" placeholder="Example: 12 or Phase 2" name="blk" value={registerData.blk} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs outline-none focus:border-blue-500 focus:bg-white" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Lot / House No.</label>
+                    <input type="text" placeholder="Example: 8 or 24-A" name="lot" value={registerData.lot} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs outline-none focus:border-blue-500 focus:bg-white" />
+                  </div>
                   <div className="flex flex-col gap-1 sm:col-span-2">
                     <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Street</label>
                     <input type="text" placeholder="Street / Road in Mambog II" name="street" value={registerData.street} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs outline-none focus:border-blue-500 focus:bg-white" />
+                  </div>
+                  <div className="flex flex-col gap-1 sm:col-span-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Subdivision / Compound / Purok</label>
+                    <input type="text" placeholder="Example: Green Plain, Villa Isabel, Purok 1" name="subdivision" value={registerData.subdivision} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs outline-none focus:border-blue-500 focus:bg-white" />
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Barangay</label>
@@ -677,14 +746,14 @@ const Login = () => {
                     <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Phone No.</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><Phone size={14} /></span>
-                      <input type="text" placeholder="09XX XXX XXXX" name="contactNumber" value={registerData.contactNumber} onChange={handleRegisterChange} maxLength={11} className="w-full rounded-xl border border-slate-100 bg-slate-50 py-3 pl-9 text-xs outline-none focus:border-blue-500 focus:bg-white" />
+                      <input type="tel" inputMode="numeric" pattern="09[0-9]{9}" autoComplete="tel" placeholder="09XXXXXXXXX" name="contactNumber" value={registerData.contactNumber} onChange={handleRegisterChange} maxLength={11} className="w-full rounded-xl border border-slate-100 bg-slate-50 py-3 pl-9 text-xs outline-none focus:border-blue-500 focus:bg-white" />
                     </div>
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Email Address</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><Mail size={14} /></span>
-                      <input type="email" placeholder="your@email.com" name="email" value={registerData.email} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 py-3 pl-9 text-xs outline-none focus:border-blue-500 focus:bg-white" />
+                      <input type="email" autoComplete="email" placeholder="your@email.com" name="email" value={registerData.email} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 py-3 pl-9 text-xs outline-none focus:border-blue-500 focus:bg-white" />
                     </div>
                   </div>
                 </div>
