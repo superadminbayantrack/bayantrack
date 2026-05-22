@@ -16,6 +16,8 @@ import NotificationState from '../models/NotificationState.js';
 import { auth, requireRoles } from '../middleware/auth.js';
 import { logSystemEvent, sendUserMail } from '../utils/notifications.js';
 import { isReservedEmbeddedIdentity } from '../config/embeddedAccounts.js';
+import { cleanText, isValidEmail, isValidPhilippineMobile } from '../utils/validation.js';
+import { paginatedPayload, parsePagination } from '../utils/pagination.js';
 
 const router = express.Router();
 const DAILY_ACTIVITY_DIR = path.join(os.tmpdir(), 'bayantrack-daily-activity');
@@ -291,10 +293,16 @@ router.get('/users', auth, requireRoles('admin', 'superadmin'), async (req, res)
       query.status = { $ne: 'active' };
     }
 
-    const users = await User.find(query)
+    const { enabled, page, limit, skip } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 100 });
+    const baseQuery = User.find(query)
       .select('-password -validIdImage -avatarImage -marriageContractImage')
-      .sort({ createdAt: -1 })
-      .lean();
+      .sort({ createdAt: -1 });
+    if (enabled) baseQuery.skip(skip).limit(limit);
+    const users = await baseQuery.lean();
+    if (enabled) {
+      const total = await User.countDocuments(query);
+      return res.json(paginatedPayload({ items: users, total, page, limit }));
+    }
     return res.json(users);
   } catch (err) {
     return res.status(500).json({ msg: 'Failed to fetch users' });
@@ -320,6 +328,12 @@ router.post('/users', auth, requireRoles('superadmin'), async (req, res) => {
     if (missing.length > 0) {
       return res.status(400).json({ msg: `${missing.join(', ')} required` });
     }
+    if (!isValidEmail(req.body.email)) {
+      return res.status(400).json({ msg: 'Valid email address is required.' });
+    }
+    if (!isValidPhilippineMobile(req.body.contactNumber)) {
+      return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
+    }
 
     const duplicate = await User.findOne({
       $or: [
@@ -332,7 +346,15 @@ router.post('/users', auth, requireRoles('superadmin'), async (req, res) => {
       return res.status(400).json({ msg: 'Username, email, or contact number already exists.' });
     }
 
-    const fields = buildUserFields(req.body, { includePassword: true });
+    const fields = buildUserFields({
+      ...req.body,
+      username: cleanText(req.body.username, { max: 80 }),
+      firstName: cleanText(req.body.firstName, { max: 80 }),
+      middleName: cleanText(req.body.middleName, { max: 80 }),
+      lastName: cleanText(req.body.lastName, { max: 80 }),
+      email: cleanText(req.body.email, { max: 254 }).toLowerCase(),
+      contactNumber: cleanText(req.body.contactNumber, { max: 20 }),
+    }, { includePassword: true });
     fields.email = String(fields.email || '').toLowerCase().trim();
     fields.address = fields.address || composeUserAddress(fields.addressDetails, 'Mambog II, Bacoor, Cavite 4102');
     fields.status = fields.status || 'active';
@@ -373,6 +395,12 @@ router.put('/users/:id', auth, requireRoles('superadmin'), async (req, res) => {
 
     const fields = buildUserFields(req.body, { includePassword: Boolean(req.body.password) });
     if (fields.email) fields.email = String(fields.email).toLowerCase().trim();
+    if (fields.email && !isValidEmail(fields.email)) {
+      return res.status(400).json({ msg: 'Valid email address is required.' });
+    }
+    if (fields.contactNumber && !isValidPhilippineMobile(fields.contactNumber)) {
+      return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
+    }
     if (fields.status && req.body.validIdStatus === undefined) {
       if (fields.status === 'active') fields.validIdStatus = 'approved';
       if (fields.status === 'pending') fields.validIdStatus = 'pending';

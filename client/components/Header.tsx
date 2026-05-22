@@ -5,7 +5,7 @@ import { LogoutConfirmation } from '@/components/LogoutConfirmation';
 import { Button } from "@/components/ui/button";
 import { User, ChevronDown, Menu, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { clearAuthSession, getToken } from "@/lib/auth";
+import { clearAuthSession, hasAuthSession } from "@/lib/auth";
 import { api } from "@/lib/api";
 import brandLogo from "../../assets/brandlogo/brand_logo.png";
 import {
@@ -34,12 +34,9 @@ export function Header() {
 
   React.useEffect(() => {
     const fetchUser = async () => {
-      const token = getToken();
-      if (token) {
+      if (hasAuthSession()) {
         try {
-          const res = await api.get("/api/auth/user", {
-            headers: { "x-auth-token": token },
-          });
+          const res = await api.get("/api/auth/user");
           setUser(res.data);
         } catch (err) {
           console.error("Failed to fetch user", err);
@@ -51,12 +48,9 @@ export function Header() {
 
   React.useEffect(() => {
     const fetchNotifications = async () => {
-      const token = getToken();
-      if (!token) return;
+      if (!hasAuthSession()) return;
       try {
-        const res = await api.get("/api/auth/notifications", {
-          headers: { "x-auth-token": token },
-        });
+        const res = await api.get("/api/auth/notifications");
         setNotifications(res.data?.items || []);
       } catch (_err) {
         setNotifications([]);
@@ -110,9 +104,11 @@ export function Header() {
   const confirmLogout = () => {
     setIsLoggingOut(true);
     setTimeout(() => {
-      clearAuthSession();
-      setUser(null);
-      navigate("/login");
+      void api.post("/api/auth/logout").catch(() => undefined).finally(() => {
+        clearAuthSession();
+        setUser(null);
+        navigate("/login");
+      });
     }, 3000);
   };
 

@@ -125,3 +125,55 @@
     white-space: pre;
   }
 }
+
+@layer utilities {
+  .safe-bottom-floating {
+    bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .dashboard-mobile-cards {
+    isolation: isolate;
+  }
+
+  .dashboard-mobile-cards :where(button, a, input, select, textarea) {
+    touch-action: manipulation;
+  }
+
+  .dashboard-mobile-cards :where(button, [role="button"]) {
+    min-height: 40px;
+  }
+
+  .dashboard-mobile-cards :where(input, select, textarea) {
+    font-size: 16px;
+  }
+
+  .dashboard-mobile-cards :where(.overflow-x-auto) {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-inline: contain;
+  }
+
+  .dashboard-mobile-cards :where(table) {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  @media (max-width: 640px) {
+    .dashboard-mobile-cards :where(main) {
+      padding-left: 0.875rem;
+      padding-right: 0.875rem;
+    }
+
+    .dashboard-mobile-cards :where(.fixed.inset-0 > div, [role="dialog"]) {
+      max-height: min(92vh, 720px);
+      max-width: calc(100vw - 1rem);
+    }
+
+    .dashboard-mobile-cards :where(th, td) {
+      white-space: normal;
+    }
+
+    .dashboard-mobile-cards :where(table) {
+      min-width: 720px;
+    }
+  }
+}

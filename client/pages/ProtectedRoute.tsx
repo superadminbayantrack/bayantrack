@@ -1,5 +1,5 @@
 import { Navigate } from "react-router-dom";
-import { getRole, getRoleHome, getToken, hasAllowedRole, type UserRole } from "@/lib/auth";
+import { getRole, getRoleHome, hasAllowedRole, hasAuthSession, type UserRole } from "@/lib/auth";
 
 interface Props {
   children: JSX.Element;
@@ -7,10 +7,9 @@ interface Props {
 }
 
 const ProtectedRoute = ({ children, allowedRoles }: Props) => {
-  const token = getToken();
   const role = getRole();
 
-  if (!token) {
+  if (!hasAuthSession()) {
     return <Navigate to="/login" replace />;
   }
 

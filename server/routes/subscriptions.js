@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import Subscription from '../models/Subscription.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { getAdminNotificationRecipients, logSystemEvent, publicHandlerLabel, resolveHandledByDetails, sendUserMail } from '../utils/notifications.js';
+import { cleanText, isValidEmail } from '../utils/validation.js';
+import { paginatedPayload, parsePagination } from '../utils/pagination.js';
 
 const router = express.Router();
 const SUBSCRIPTION_STATUSES = ['active', 'unsubscribed'];
@@ -63,14 +65,14 @@ async function notifySubscriptionUpdate({ item, title, textTitle, actor, notifyS
 router.post('/', optionalAuth, async (req, res) => {
   try {
     const { email, source } = req.body;
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!isValidEmail(email)) {
       return res.status(400).json({ msg: 'Valid email is required' });
     }
 
     const payload = {
-      email: String(email).toLowerCase().trim(),
+      email: cleanText(email, { max: 254 }).toLowerCase(),
       status: 'active',
-      source: source || 'homepage',
+      source: cleanText(source || 'homepage', { max: 80 }) || 'homepage',
       createdBy: mongoose.Types.ObjectId.isValid(String(req.user?.id || '')) ? req.user.id : null,
     };
 
@@ -95,9 +97,22 @@ router.post('/', optionalAuth, async (req, res) => {
   }
 });
 
-router.get('/', auth, requireRoles('admin', 'superadmin'), async (_req, res) => {
+router.get('/', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
   try {
-    const items = await Subscription.find().sort({ createdAt: -1 }).limit(500).lean();
+    const query = {};
+    const status = cleanText(req.query.status, { max: 40 });
+    const search = cleanText(req.query.search, { max: 120 });
+    if (status) query.status = status;
+    if (search) query.email = { $regex: search, $options: 'i' };
+    const { enabled, page, limit, skip } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 100 });
+    const itemQuery = Subscription.find(query).sort({ createdAt: -1 });
+    if (enabled) itemQuery.skip(skip).limit(limit);
+    else itemQuery.limit(500);
+    const items = await itemQuery.lean();
+    if (enabled) {
+      const total = await Subscription.countDocuments(query);
+      return res.json(paginatedPayload({ items, total, page, limit }));
+    }
     return res.json(items);
   } catch (_err) {
     return res.status(500).json({ msg: 'Failed to fetch subscriptions' });
@@ -145,7 +160,7 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
     const update = {};
     if (req.body.email !== undefined) {
       const email = String(req.body.email || '').toLowerCase().trim();
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      if (!isValidEmail(email)) {
         return res.status(400).json({ msg: 'Valid email is required' });
       }
       update.email = email;

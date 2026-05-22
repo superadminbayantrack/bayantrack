@@ -1,20 +1,11 @@
-import axios, { AxiosHeaders } from 'axios';
-import { clearAuthSession, getToken } from './auth';
+import axios from 'axios';
+import { clearAuthSession } from './auth';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 export const api = axios.create({
   baseURL: API_BASE,
-});
-
-api.interceptors.request.use((config) => {
-  const token = getToken();
-  if (token) {
-    const headers = AxiosHeaders.from(config.headers);
-    headers.set('x-auth-token', token);
-    config.headers = headers;
-  }
-  return config;
+  withCredentials: true,
 });
 
 api.interceptors.response.use(
@@ -40,6 +31,5 @@ api.interceptors.response.use(
 );
 
 export function authHeaders() {
-  const token = getToken();
-  return token ? { 'x-auth-token': token } : {};
+  return {};
 }

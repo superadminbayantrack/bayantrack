@@ -5,7 +5,7 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { Reveal } from "@/components/Reveal";
 import { api, authHeaders } from '@/lib/api';
-import { getToken } from '@/lib/auth';
+import { hasAuthSession } from '@/lib/auth';
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { EmergencySafetyRouteCard } from "@/components/EmergencySafetyRouteCard";
 
@@ -61,7 +61,7 @@ export default function FactCheck() {
 
   useEffect(() => {
     const loadReporter = async () => {
-      if (!getToken()) return;
+      if (!hasAuthSession()) return;
 
       try {
         const res = await api.get('/api/auth/user', { headers: authHeaders() });

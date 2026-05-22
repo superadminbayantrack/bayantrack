@@ -1854,7 +1854,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-slate-100">
+    <div className="dashboard-mobile-cards min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-slate-100">
       <div className={`sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur transition-[margin] duration-200 ${isSidebarCollapsed ? "md:ml-20" : "md:ml-[280px]"}`}>
         <div className="flex w-full items-center gap-3 px-4 py-4 sm:px-6">
           <button className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-900 text-white md:hidden" onClick={() => setIsMenuOpen((v) => !v)} type="button" aria-label="Toggle sidebar">

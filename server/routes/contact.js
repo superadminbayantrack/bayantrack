@@ -5,6 +5,8 @@ import ContactMessage from '../models/ContactMessage.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
 import { getAdminNotificationRecipients, logSystemEvent, publicHandlerLabel, resolveHandledByDetails, sendUserMail } from '../utils/notifications.js';
+import { cleanText, isValidContact, isValidEmail, requireTextFields } from '../utils/validation.js';
+import { paginatedPayload, parsePagination } from '../utils/pagination.js';
 
 const router = express.Router();
 const MESSAGE_STATUSES = ['new', 'read', 'closed'];
@@ -79,7 +81,19 @@ router.get('/departments', async (_req, res) => {
 
 router.post('/departments', auth, requireRoles('superadmin'), async (req, res) => {
   try {
-    const dept = await Department.create(req.body);
+    const name = cleanText(req.body.name, { max: 120 });
+    if (!name) return res.status(400).json({ msg: 'Department name is required.' });
+    if (req.body.email && !isValidEmail(req.body.email)) {
+      return res.status(400).json({ msg: 'Department email must be valid.' });
+    }
+    const dept = await Department.create({
+      ...req.body,
+      name,
+      email: cleanText(req.body.email, { max: 254 }),
+      phone: cleanText(req.body.phone, { max: 40 }),
+      localNumber: cleanText(req.body.localNumber, { max: 30 }),
+      contactPerson: cleanText(req.body.contactPerson, { max: 120 }),
+    });
     await logSystemEvent({
       user: req.user.id,
       type: 'department-management',
@@ -133,9 +147,21 @@ router.delete('/departments/:id', auth, requireRoles('superadmin'), async (req, 
 
 router.post('/messages', optionalAuth, async (req, res) => {
   try {
+    const missing = requireTextFields(req.body, ['name', 'contact', 'department', 'message']);
+    if (missing) return res.status(400).json({ msg: missing });
+    if (!isValidContact(req.body.contact)) {
+      return res.status(400).json({ msg: 'Contact must be a valid email address or 09XXXXXXXXX mobile number.' });
+    }
+    const messageBody = cleanText(req.body.message, { max: 2000 });
+    if (messageBody.length < 10) {
+      return res.status(400).json({ msg: 'Message must be at least 10 characters long.' });
+    }
     const referenceNo = makeReference('MSG');
     const message = await ContactMessage.create({
-      ...req.body,
+      name: cleanText(req.body.name, { max: 120 }),
+      contact: cleanText(req.body.contact, { max: 254 }),
+      department: cleanText(req.body.department, { max: 120 }),
+      message: messageBody,
       referenceNo,
       user: mongoose.Types.ObjectId.isValid(String(req.user?.id || '')) ? req.user.id : null,
     });
@@ -164,7 +190,25 @@ router.post('/messages', optionalAuth, async (req, res) => {
 
 router.get('/messages', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
   try {
-    const messages = await ContactMessage.find().sort({ createdAt: -1 }).lean();
+    const query = {};
+    const status = cleanText(req.query.status, { max: 40 });
+    const search = cleanText(req.query.search, { max: 120 });
+    if (status) query.status = status;
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { department: { $regex: search, $options: 'i' } },
+        { referenceNo: { $regex: search, $options: 'i' } },
+      ];
+    }
+    const { enabled, page, limit, skip } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 100 });
+    const messageQuery = ContactMessage.find(query).sort({ createdAt: -1 });
+    if (enabled) messageQuery.skip(skip).limit(limit);
+    const messages = await messageQuery.lean();
+    if (enabled) {
+      const total = await ContactMessage.countDocuments(query);
+      return res.json(paginatedPayload({ items: messages, total, page, limit }));
+    }
     return res.json(messages);
   } catch (err) {
     return res.status(500).json({ msg: 'Failed to fetch messages' });
@@ -215,8 +259,14 @@ router.put('/messages/:id', auth, requireRoles('admin', 'superadmin'), requireAd
   try {
     const update = {};
     ['name', 'contact', 'department', 'message', 'status', 'adminComment'].forEach((key) => {
-      if (req.body[key] !== undefined) update[key] = req.body[key];
+      if (req.body[key] !== undefined) update[key] = typeof req.body[key] === 'string' ? cleanText(req.body[key], { max: key === 'message' ? 2000 : 500 }) : req.body[key];
     });
+    if (update.contact && !isValidContact(update.contact)) {
+      return res.status(400).json({ msg: 'Contact must be a valid email address or 09XXXXXXXXX mobile number.' });
+    }
+    if (update.message !== undefined && String(update.message).length < 10) {
+      return res.status(400).json({ msg: 'Message must be at least 10 characters long.' });
+    }
     if (update.status && !MESSAGE_STATUSES.includes(update.status)) {
       return res.status(400).json({ msg: 'Invalid status' });
     }

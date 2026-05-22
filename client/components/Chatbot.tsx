@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, Maximize2, MessageCircle, Minimize2, Paperclip, Send, Sparkles, Star, X } from "lucide-react";
 import { api } from "@/lib/api";
-import { getToken } from "@/lib/auth";
+import { hasAuthSession } from "@/lib/auth";
 
 const cn = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ");
 
@@ -490,7 +490,7 @@ export function Chatbot() {
     const shared: Message = { id: Date.now(), text: "Send current live location.", isBot: false };
     setMessages((prev) => [...prev, shared]);
 
-    if (!getToken()) {
+    if (!hasAuthSession()) {
       appendBotMessage("Para maipadala ang live location sa barangay dashboard, mag-login muna sa resident account.", [
         { label: "Go to Login", type: "link", payload: "/login" },
       ]);
@@ -641,7 +641,7 @@ export function Chatbot() {
   };
 
   return (
-    <div className="fixed bottom-4 right-3 z-[100] sm:bottom-6 sm:right-6">
+    <div className="safe-bottom-floating fixed bottom-4 right-3 z-[100] sm:bottom-6 sm:right-6">
       <button
         onClick={() => {
           if (isOpen) {

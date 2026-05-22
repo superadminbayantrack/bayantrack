@@ -20,7 +20,9 @@ import Department from './models/Department.js';
 import Announcement from './models/Announcement.js';
 import Official from './models/Official.js';
 import SystemSetting from './models/SystemSetting.js';
+import { AUTH_COOKIE_NAME, getJwtSecret, isProductionEnv, validateRuntimeEnv } from './config/env.js';
 import { getEmbeddedAccountById } from './config/embeddedAccounts.js';
+import { applySecurityMiddleware, authLimiter, otpLimiter, publicSubmitLimiter, sanitizeMongoPayloads } from './middleware/security.js';
 
 dotenv.config({ path: '.env.local' });
 dotenv.config();
@@ -41,7 +43,7 @@ function getBootstrapAccounts() {
   return [
     {
       username: process.env.BOOTSTRAP_ADMIN_USERNAME || 'admin',
-      password: process.env.BOOTSTRAP_ADMIN_PASSWORD || 'admin',
+      password: requireBootstrapSecret('BOOTSTRAP_ADMIN_PASSWORD', 'admin'),
       role: 'admin',
       firstName: 'Admin',
       lastName: 'Bayan Track',
@@ -51,7 +53,7 @@ function getBootstrapAccounts() {
     },
     {
       username: process.env.BOOTSTRAP_SUPERADMIN_USERNAME || 'superAdmin123',
-      password: process.env.BOOTSTRAP_SUPERADMIN_PASSWORD || 'superAdmin123',
+      password: requireBootstrapSecret('BOOTSTRAP_SUPERADMIN_PASSWORD', 'superAdmin123'),
       role: 'superadmin',
       firstName: 'Super',
       lastName: 'Admin',
@@ -60,6 +62,14 @@ function getBootstrapAccounts() {
       address: 'City Hall',
     },
   ];
+}
+
+function requireBootstrapSecret(name, fallback) {
+  const value = process.env[name] || fallback;
+  if (isProductionEnv() && value === fallback) {
+    throw new Error(`${name} must be set in production. Refusing to use a default bootstrap password.`);
+  }
+  return value;
 }
 
 function getMongoUri() {
@@ -282,7 +292,8 @@ function getRequestToken(req) {
   const bearerToken = req.header('authorization')?.startsWith('Bearer ')
     ? req.header('authorization').replace('Bearer ', '')
     : null;
-  return headerToken || bearerToken || '';
+  const cookieToken = req.cookies?.[AUTH_COOKIE_NAME] || null;
+  return headerToken || bearerToken || cookieToken || '';
 }
 
 async function isAdminRequest(req) {
@@ -290,7 +301,7 @@ async function isAdminRequest(req) {
   if (!token) return false;
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secrettoken');
+    const decoded = jwt.verify(token, getJwtSecret());
     const userId = decoded?.user?.id;
     const embeddedAccount = getEmbeddedAccountById(userId);
     if (embeddedAccount) {
@@ -328,6 +339,7 @@ async function enforceMaintenanceMode(req, res, next) {
 }
 
 export function createServer() {
+  validateRuntimeEnv();
   const app = express();
 
   const allowedOrigins = (process.env.CORS_ORIGIN || '')
@@ -364,6 +376,7 @@ export function createServer() {
   });
 
   app.use('/api', corsMiddleware);
+  applySecurityMiddleware(app);
 
   app.use((req, res, next) => {
     const isViteDevFrontend =
@@ -398,13 +411,27 @@ export function createServer() {
     next();
   });
 
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(express.json({ limit: '8mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '8mb' }));
+  app.use(sanitizeMongoPayloads);
 
   app.get('/api/ping', (_req, res) => {
     const ping = process.env.PING_MESSAGE ?? 'ping';
     res.json({ message: ping });
   });
+
+  app.use('/api/auth/login', authLimiter);
+  app.use(['/api/auth/register', '/api/auth/register/check'], authLimiter);
+  app.use([
+    '/api/auth/send-otp',
+    '/api/auth/forgot-password',
+    '/api/auth/reset-password',
+    '/api/auth/change-email/request-otp',
+    '/api/auth/change-password/request-otp',
+    '/api/auth/child-access/request-otp',
+    '/api/auth/child-session/request-otp',
+  ], otpLimiter);
+  app.use(['/api/reports', '/api/contact/messages', '/api/subscriptions'], publicSubmitLimiter);
 
   app.use('/api', async (_req, _res, next) => {
     try {

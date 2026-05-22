@@ -8,6 +8,8 @@ import User from '../models/User.js';
 import { auth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
 import { getAdminNotificationRecipients, logSystemEvent, publicHandlerLabel, resolveHandledByDetails, sendUserMail } from '../utils/notifications.js';
+import { cleanText, isValidPhilippineMobile, requireTextFields } from '../utils/validation.js';
+import { paginatedPayload, parsePagination } from '../utils/pagination.js';
 
 const router = express.Router();
 
@@ -270,6 +272,15 @@ router.delete('/catalog/:id', auth, requireRoles('superadmin'), async (req, res)
 
 router.post('/requests', auth, async (req, res) => {
   try {
+    const missing = requireTextFields(req.body, ['serviceType', 'fullName', 'contactNumber', 'address', 'purpose']);
+    if (missing) return res.status(400).json({ msg: missing });
+    if (!isValidPhilippineMobile(req.body.contactNumber)) {
+      return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
+    }
+    const purpose = cleanText(req.body.purpose, { max: 1500 });
+    if (purpose.length < 5) {
+      return res.status(400).json({ msg: 'Purpose must be at least 5 characters long.' });
+    }
     const hasMongoActor = mongoose.Types.ObjectId.isValid(String(req.user.id || ''));
     const parentUser = hasMongoActor
       ? await User.findById(req.user.id).select('firstName lastName email children')
@@ -282,7 +293,11 @@ router.post('/requests', auth, async (req, res) => {
       ? (parentUser.children || []).find((child) => String(child._id) === String(req.user.actingChild.id))
       : null;
     const request = await ServiceRequest.create({
-      ...req.body,
+      serviceType: cleanText(req.body.serviceType, { max: 120 }),
+      fullName: cleanText(req.body.fullName, { max: 140 }),
+      contactNumber: cleanText(req.body.contactNumber, { max: 20 }),
+      address: cleanText(req.body.address, { max: 300 }),
+      purpose,
       user: parentUser?._id || null,
       referenceNo,
       history: [{ status: 'pending', by: hasMongoActor ? req.user.id : undefined, note: 'Request submitted' }],
@@ -362,9 +377,27 @@ router.get('/requests/track/:referenceNo', auth, async (req, res) => {
   }
 });
 
-router.get('/requests', auth, requireRoles('admin', 'superadmin'), async (_req, res) => {
+router.get('/requests', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
   try {
-    const items = await ServiceRequest.find().sort({ createdAt: -1 }).lean();
+    const query = {};
+    const status = cleanText(req.query.status, { max: 40 });
+    const search = cleanText(req.query.search, { max: 120 });
+    if (status) query.status = status;
+    if (search) {
+      query.$or = [
+        { fullName: { $regex: search, $options: 'i' } },
+        { serviceType: { $regex: search, $options: 'i' } },
+        { referenceNo: { $regex: search, $options: 'i' } },
+      ];
+    }
+    const { enabled, page, limit, skip } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 100 });
+    const itemQuery = ServiceRequest.find(query).sort({ createdAt: -1 });
+    if (enabled) itemQuery.skip(skip).limit(limit);
+    const items = await itemQuery.lean();
+    if (enabled) {
+      const total = await ServiceRequest.countDocuments(query);
+      return res.json(paginatedPayload({ items, total, page, limit }));
+    }
     return res.json(items);
   } catch (err) {
     return res.status(500).json({ msg: 'Failed to fetch requests' });
@@ -419,8 +452,14 @@ router.put('/requests/:id', auth, requireRoles('admin', 'superadmin'), requireAd
   try {
     const update = {};
     ['serviceType', 'fullName', 'contactNumber', 'address', 'purpose', 'status', 'adminComment'].forEach((key) => {
-      if (req.body[key] !== undefined) update[key] = req.body[key];
+      if (req.body[key] !== undefined) update[key] = typeof req.body[key] === 'string' ? cleanText(req.body[key], { max: key === 'purpose' ? 1500 : 500 }) : req.body[key];
     });
+    if (update.contactNumber && !isValidPhilippineMobile(update.contactNumber)) {
+      return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
+    }
+    if (update.purpose !== undefined && String(update.purpose).length < 5) {
+      return res.status(400).json({ msg: 'Purpose must be at least 5 characters long.' });
+    }
     if (update.status && !['pending', 'in-review', 'approved', 'rejected', 'completed'].includes(update.status)) {
       return res.status(400).json({ msg: 'Invalid status' });
     }

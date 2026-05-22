@@ -20,7 +20,9 @@ import Department from "./models/Department.js";
 import Announcement from "./models/Announcement.js";
 import Official from "./models/Official.js";
 import SystemSetting from "./models/SystemSetting.js";
+import { AUTH_COOKIE_NAME, getJwtSecret, validateRuntimeEnv } from "./config/env.js";
 import { getEmbeddedAccountById } from "./config/embeddedAccounts.js";
+import { applySecurityMiddleware, authLimiter, otpLimiter, publicSubmitLimiter, sanitizeMongoPayloads } from "./middleware/security.js";
 import { DEFAULT_ADMIN_PERMISSIONS, getBootstrapAccounts, type BootstrapAccount } from "./config/bootstrapAccounts";
 
 const require = createRequire(import.meta.url);
@@ -247,20 +249,21 @@ async function ensureDatabaseReady() {
   await dbInitPromise;
 }
 
-function getRequestToken(req: express.Request) {
+function getRequestToken(req: any) {
   const headerToken = req.header("x-auth-token");
   const bearerToken = req.header("authorization")?.startsWith("Bearer ")
     ? req.header("authorization").replace("Bearer ", "")
     : null;
-  return headerToken || bearerToken || "";
+  const cookieToken = req.cookies?.[AUTH_COOKIE_NAME] || null;
+  return headerToken || bearerToken || cookieToken || "";
 }
 
-async function isAdminRequest(req: express.Request) {
+async function isAdminRequest(req: any) {
   const token = getRequestToken(req);
   if (!token) return false;
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "secrettoken");
+    const decoded = jwt.verify(token, getJwtSecret());
     const userId = decoded?.user?.id;
     const embeddedAccount = getEmbeddedAccountById(userId);
     if (embeddedAccount) {
@@ -275,7 +278,7 @@ async function isAdminRequest(req: express.Request) {
   }
 }
 
-async function enforceMaintenanceMode(req: express.Request, res: express.Response, next: express.NextFunction) {
+async function enforceMaintenanceMode(req: any, res: any, next: any) {
   if (req.path === "/ping" || req.path.startsWith("/admin") || req.path === "/auth/login" || req.path.startsWith("/emergency-alerts")) {
     return next();
   }
@@ -298,6 +301,7 @@ async function enforceMaintenanceMode(req: express.Request, res: express.Respons
 }
 
 export function createServer() {
+  validateRuntimeEnv();
   const app = express();
 
   // Middleware
@@ -334,6 +338,7 @@ export function createServer() {
   });
 
   app.use("/api", corsMiddleware);
+  applySecurityMiddleware(app);
 
   // Basic security headers.
   app.use((req, res, next) => {
@@ -370,14 +375,28 @@ export function createServer() {
     next();
   });
 
-  app.use(express.json({ limit: "10mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+  app.use(express.json({ limit: "8mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "8mb" }));
+  app.use(sanitizeMongoPayloads);
 
   // Health check that does not require MongoDB.
   app.get("/api/ping", (_req, res) => {
     const ping = process.env.PING_MESSAGE ?? "ping";
     res.json({ message: ping });
   });
+
+  app.use("/api/auth/login", authLimiter);
+  app.use(["/api/auth/register", "/api/auth/register/check"], authLimiter);
+  app.use([
+    "/api/auth/send-otp",
+    "/api/auth/forgot-password",
+    "/api/auth/reset-password",
+    "/api/auth/change-email/request-otp",
+    "/api/auth/change-password/request-otp",
+    "/api/auth/child-access/request-otp",
+    "/api/auth/child-session/request-otp",
+  ], otpLimiter);
+  app.use(["/api/reports", "/api/contact/messages", "/api/subscriptions"], publicSubmitLimiter);
 
   app.use("/api", async (_req, _res, next) => {
     try {

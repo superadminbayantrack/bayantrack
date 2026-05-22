@@ -1,9 +1,9 @@
 export type UserRole = "resident" | "admin" | "superadmin";
 
 const ROLE_KEY = "role";
-const TOKEN_KEY = "token";
-let activeToken: string | null = null;
+const SESSION_KEY = "auth_session";
 let activeRole: UserRole | null = null;
+let activeSession = false;
 
 function getStoredValue(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -33,10 +33,14 @@ function clearPersistentAuthStorage() {
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.removeItem(TOKEN_KEY);
+    // Remove legacy token keys from older builds. Current auth uses an httpOnly
+    // cookie, so JavaScript should never store the JWT.
+    window.localStorage.removeItem("token");
     window.localStorage.removeItem(ROLE_KEY);
-    window.sessionStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(SESSION_KEY);
+    window.sessionStorage.removeItem("token");
     window.sessionStorage.removeItem(ROLE_KEY);
+    window.sessionStorage.removeItem(SESSION_KEY);
   } catch (_err) {
     // Storage can be unavailable in private or restricted browser contexts.
   }
@@ -51,32 +55,33 @@ export function normalizeRole(value: unknown): UserRole | null {
 }
 
 function hydrateAuthSession() {
-  activeToken = getStoredValue(TOKEN_KEY);
   activeRole = normalizeRole(getStoredValue(ROLE_KEY));
+  activeSession = getStoredValue(SESSION_KEY) === "true";
 }
 
 hydrateAuthSession();
-
-export function getToken(): string | null {
-  if (!activeToken) activeToken = getStoredValue(TOKEN_KEY);
-  return activeToken;
-}
 
 export function getRole(): UserRole | null {
   if (!activeRole) activeRole = normalizeRole(getStoredValue(ROLE_KEY));
   return activeRole;
 }
 
-export function setAuthSession(token: string, role: UserRole) {
-  activeToken = token;
+export function hasAuthSession(): boolean {
+  if (!activeSession) activeSession = getStoredValue(SESSION_KEY) === "true";
+  return activeSession;
+}
+
+export function setAuthSession(_token: string | undefined, role: UserRole) {
   activeRole = role;
-  setStoredValue(TOKEN_KEY, token);
+  activeSession = true;
+  clearPersistentAuthStorage();
   setStoredValue(ROLE_KEY, role);
+  setStoredValue(SESSION_KEY, "true");
 }
 
 export function clearAuthSession() {
-  activeToken = null;
   activeRole = null;
+  activeSession = false;
   clearPersistentAuthStorage();
 }
 

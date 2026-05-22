@@ -193,7 +193,7 @@ const Login = () => {
         });
         const role = normalizeRole(res.data.role) || "resident";
 
-        setAuthSession(res.data.token, role);
+        setAuthSession(undefined, role);
         setLoginProgress(100);
         navigate(getRoleHome(role));
       } catch (err: any) {

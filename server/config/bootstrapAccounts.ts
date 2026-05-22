@@ -18,11 +18,23 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
   subscribers: { view: true, add: true, edit: true, archive: true, delete: true },
 } as const;
 
+function isProductionEnv() {
+  return process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
+}
+
+function requireBootstrapSecret(name: string, fallback: string) {
+  const value = process.env[name] || fallback;
+  if (isProductionEnv() && value === fallback) {
+    throw new Error(`${name} must be set in production. Refusing to use a default bootstrap password.`);
+  }
+  return value;
+}
+
 export function getBootstrapAccounts(): BootstrapAccount[] {
   return [
     {
       username: process.env.BOOTSTRAP_ADMIN_USERNAME || "admin",
-      password: process.env.BOOTSTRAP_ADMIN_PASSWORD || "admin",
+      password: requireBootstrapSecret("BOOTSTRAP_ADMIN_PASSWORD", "admin"),
       role: "admin",
       firstName: "Admin",
       lastName: "Bayan Track",
@@ -32,7 +44,7 @@ export function getBootstrapAccounts(): BootstrapAccount[] {
     },
     {
       username: process.env.BOOTSTRAP_SUPERADMIN_USERNAME || "superAdmin123",
-      password: process.env.BOOTSTRAP_SUPERADMIN_PASSWORD || "superAdmin123",
+      password: requireBootstrapSecret("BOOTSTRAP_SUPERADMIN_PASSWORD", "superAdmin123"),
       role: "superadmin",
       firstName: "Super",
       lastName: "Admin",

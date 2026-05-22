@@ -30,7 +30,11 @@ export default defineConfig({
         "querystring",
         "child_process",
         // External dependencies that should not be bundled
+        "compression",
+        "cookie-parser",
         "express",
+        "express-rate-limit",
+        "helmet",
         "cors",
       ],
       output: {

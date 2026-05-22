@@ -1,12 +1,9 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import { AUTH_COOKIE_NAME, getJwtSecret } from '../config/env.js';
 import { getEmbeddedAccountById } from '../config/embeddedAccounts.js';
 
 const PERMISSION_ACTIONS = ['view', 'add', 'edit', 'archive', 'delete'];
-
-function getJwtSecret() {
-  return process.env.JWT_SECRET || 'secrettoken';
-}
 
 function defaultPermissionFlags() {
   return { view: true, add: true, edit: true, archive: true, delete: true };
@@ -37,8 +34,9 @@ export const auth = async (req, res, next) => {
   const bearerToken = req.header('authorization')?.startsWith('Bearer ')
     ? req.header('authorization').replace('Bearer ', '')
     : null;
+  const cookieToken = req.cookies?.[AUTH_COOKIE_NAME] || null;
 
-  const token = headerToken || bearerToken;
+  const token = headerToken || bearerToken || cookieToken;
 
   if (!token) {
     return res.status(401).json({ msg: 'No token, authorization denied' });
@@ -93,7 +91,8 @@ export const optionalAuth = async (req, _res, next) => {
   const bearerToken = req.header('authorization')?.startsWith('Bearer ')
     ? req.header('authorization').replace('Bearer ', '')
     : null;
-  const token = headerToken || bearerToken;
+  const cookieToken = req.cookies?.[AUTH_COOKIE_NAME] || null;
+  const token = headerToken || bearerToken || cookieToken;
 
   if (!token) {
     return next();

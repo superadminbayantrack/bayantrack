@@ -6,10 +6,13 @@ import SystemSetting from '../models/SystemSetting.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
 import { getAdminNotificationRecipients, logSystemEvent, publicHandlerLabel, resolveHandledByDetails, sendUserMail } from '../utils/notifications.js';
+import { cleanText, isValidPhilippineMobile, requireTextFields } from '../utils/validation.js';
+import { paginatedPayload, parsePagination } from '../utils/pagination.js';
 
 const router = express.Router();
 const REPORT_STATUSES = ['new', 'in-review', 'resolved', 'rejected'];
 const AUTO_ARCHIVE_RESOLVED_AFTER_DAYS = 7;
+const MAX_REPORT_ATTACHMENT_DATA_URL_LENGTH = 3_000_000;
 
 function normalizeAttachments(value) {
   if (!Array.isArray(value)) return [];
@@ -21,7 +24,7 @@ function normalizeAttachments(value) {
       size: Number(item?.size) || 0,
       dataUrl: String(item?.dataUrl || ''),
     }))
-    .filter((item) => item.dataUrl.startsWith('data:image/'));
+    .filter((item) => item.dataUrl.startsWith('data:image/') && item.dataUrl.length <= MAX_REPORT_ATTACHMENT_DATA_URL_LENGTH);
 }
 
 function reportEmailHtml({ title, lines = [] }) {
@@ -105,9 +108,22 @@ async function autoArchiveResolvedReportsIfEnabled() {
 
 router.post('/', optionalAuth, async (req, res) => {
   try {
+    const missing = requireTextFields(req.body, ['fullName', 'contactNumber', 'address', 'category', 'description']);
+    if (missing) return res.status(400).json({ msg: missing });
+    if (!isValidPhilippineMobile(req.body.contactNumber)) {
+      return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
+    }
+    const description = cleanText(req.body.description, { max: 3000 });
+    if (description.length < 10) {
+      return res.status(400).json({ msg: 'Description must be at least 10 characters long.' });
+    }
     const referenceNo = makeReference('RPT');
     const payload = {
-      ...req.body,
+      fullName: cleanText(req.body.fullName, { max: 140 }),
+      contactNumber: cleanText(req.body.contactNumber, { max: 20 }),
+      address: cleanText(req.body.address, { max: 300 }),
+      category: cleanText(req.body.category, { max: 100 }),
+      description,
       attachments: normalizeAttachments(req.body.attachments),
       referenceNo,
       user: mongoose.Types.ObjectId.isValid(String(req.user?.id || '')) ? req.user.id : null,
@@ -137,13 +153,32 @@ router.post('/', optionalAuth, async (req, res) => {
   }
 });
 
-router.get('/', auth, requireRoles('admin', 'superadmin'), async (_req, res) => {
+router.get('/', auth, requireRoles('admin', 'superadmin'), async (req, res) => {
   try {
     await autoArchiveResolvedReportsIfEnabled();
-    const reports = await IssueReport.find()
+    const query = {};
+    const status = cleanText(req.query.status, { max: 40 });
+    const category = cleanText(req.query.category, { max: 80 });
+    const search = cleanText(req.query.search, { max: 120 });
+    if (status) query.status = status;
+    if (category) query.category = category;
+    if (search) {
+      query.$or = [
+        { fullName: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } },
+        { referenceNo: { $regex: search, $options: 'i' } },
+      ];
+    }
+    const { enabled, page, limit, skip } = parsePagination(req.query, { defaultLimit: 50, maxLimit: 100 });
+    const reportQuery = IssueReport.find(query)
       .select('-attachments.dataUrl')
-      .sort({ createdAt: -1 })
-      .lean();
+      .sort({ createdAt: -1 });
+    if (enabled) reportQuery.skip(skip).limit(limit);
+    const reports = await reportQuery.lean();
+    if (enabled) {
+      const total = await IssueReport.countDocuments(query);
+      return res.json(paginatedPayload({ items: reports, total, page, limit }));
+    }
     return res.json(reports);
   } catch (err) {
     return res.status(500).json({ msg: 'Failed to fetch reports' });
@@ -166,8 +201,14 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
   try {
     const update = {};
     ['fullName', 'contactNumber', 'address', 'category', 'description', 'adminComment'].forEach((key) => {
-      if (req.body[key] !== undefined) update[key] = req.body[key];
+      if (req.body[key] !== undefined) update[key] = cleanText(req.body[key], { max: key === 'description' ? 3000 : 500 });
     });
+    if (update.contactNumber && !isValidPhilippineMobile(update.contactNumber)) {
+      return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
+    }
+    if (update.description !== undefined && String(update.description).length < 10) {
+      return res.status(400).json({ msg: 'Description must be at least 10 characters long.' });
+    }
     if (req.body.status !== undefined) {
       if (!REPORT_STATUSES.includes(req.body.status)) {
         return res.status(400).json({ msg: 'Invalid status' });

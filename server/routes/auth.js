@@ -7,8 +7,10 @@ import ActivityLog from '../models/ActivityLog.js';
 import SystemSetting from '../models/SystemSetting.js';
 import ServiceRequest from '../models/ServiceRequest.js';
 import { auth } from '../middleware/auth.js';
+import { AUTH_COOKIE_NAME, getAuthCookieOptions, getJwtSecret } from '../config/env.js';
 import { getAdminNotificationRecipients, logSystemEvent, sendUserMail } from '../utils/notifications.js';
 import { findEmbeddedAccount, getEmbeddedAccountById, isReservedEmbeddedIdentity } from '../config/embeddedAccounts.js';
+import { isValidEmail, isValidPhilippineMobile } from '../utils/validation.js';
 
 const router = express.Router();
 const AUTH_TOKEN_TTL = process.env.AUTH_TOKEN_TTL || '7d';
@@ -28,6 +30,14 @@ const ALLOWED_SUBDIVISIONS = [
   'talaba',
 ];
 const OTP_EMAIL_UNAVAILABLE_MESSAGE = 'OTP email service is currently unavailable. Check the Vercel email environment variables.';
+
+function setAuthCookie(req, res, token) {
+  res.cookie(AUTH_COOKIE_NAME, token, getAuthCookieOptions(req));
+}
+
+function clearAuthCookie(req, res) {
+  res.clearCookie(AUTH_COOKIE_NAME, getAuthCookieOptions(req));
+}
 
 function normalizeText(value) {
   return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -412,6 +422,12 @@ router.post('/register/check', async (req, res) => {
     if (!username || !email || !contactNumber) {
       return res.status(400).json({ msg: 'Username, email, and phone number are required.' });
     }
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ msg: 'Valid email address is required.' });
+    }
+    if (!isValidPhilippineMobile(contactNumber)) {
+      return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
+    }
     if (isReservedEmbeddedIdentity({ username, email, contactNumber })) {
       return res.status(400).json({ msg: 'These login details are reserved for barangay staff. Please use different resident details.' });
     }
@@ -420,10 +436,6 @@ router.post('/register/check', async (req, res) => {
     const residentCheck = ensureResidentAddress({ address, addressDetails: normalizedAddress });
     if (!residentCheck.ok) {
       return res.status(400).json({ msg: residentCheck.msg });
-    }
-
-    if (!/^\d{11}$/.test(contactNumber)) {
-      return res.status(400).json({ msg: 'Contact number must be exactly 11 digits' });
     }
 
     const user = await User.findOne({ $or: [{ email }, { username }, { contactNumber }] });
@@ -475,6 +487,9 @@ router.post('/register', async (req, res) => {
 
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const normalizedAddress = normalizeAddressDetails(addressDetails);
+    if (!isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ msg: 'Valid email address is required.' });
+    }
     if (isReservedEmbeddedIdentity({ username, email: normalizedEmail, contactNumber })) {
       return res.status(400).json({ msg: 'These login details are reserved for barangay staff. Please use different resident details.' });
     }
@@ -486,8 +501,8 @@ router.post('/register', async (req, res) => {
     }
 
     // Validate Contact Number (Must be 11 digits)
-    if (!/^\d{11}$/.test(contactNumber)) {
-      return res.status(400).json({ msg: 'Contact number must be exactly 11 digits' });
+    if (!isValidPhilippineMobile(contactNumber)) {
+      return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
     }
     if (!isStrongPassword(password)) {
       return res.status(400).json({ msg: 'Password must be at least 8 characters and include uppercase, lowercase, and 1 special character.' });
@@ -595,9 +610,10 @@ router.post('/login', async (req, res) => {
           id: embeddedAccount.id,
         },
       };
-      return jwt.sign(payload, process.env.JWT_SECRET || 'secrettoken', { expiresIn: AUTH_TOKEN_TTL }, (err, token) => {
+      return jwt.sign(payload, getJwtSecret(), { expiresIn: AUTH_TOKEN_TTL }, (err, token) => {
         if (err) throw err;
-        return res.json({ token, role: embeddedAccount.role, actingChild: null });
+        setAuthCookie(req, res, token);
+        return res.json({ role: embeddedAccount.role, actingChild: null });
       });
     }
 
@@ -683,7 +699,7 @@ router.post('/login', async (req, res) => {
       await user.save();
     }
 
-    // Return Token (JWT)
+    // The JWT is stored in an httpOnly cookie so browser JavaScript cannot read it.
     const payload = {
       user: {
         id: user.id,
@@ -696,14 +712,20 @@ router.post('/login', async (req, res) => {
         } : {}),
       },
     };
-    jwt.sign(payload, process.env.JWT_SECRET || 'secrettoken', { expiresIn: AUTH_TOKEN_TTL }, (err, token) => {
+    jwt.sign(payload, getJwtSecret(), { expiresIn: AUTH_TOKEN_TTL }, (err, token) => {
       if (err) throw err;
-      res.json({ token, role: user.role, actingChild });
+      setAuthCookie(req, res, token);
+      res.json({ role: user.role, actingChild });
     });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server error');
   }
+});
+
+router.post('/logout', (req, res) => {
+  clearAuthCookie(req, res);
+  return res.json({ msg: 'Logged out successfully.' });
 });
 
 // @route   GET api/auth/user
@@ -818,8 +840,8 @@ router.put('/user', auth, async (req, res) => {
     }
 
     if (contactNumber && contactNumber !== user.contactNumber) {
-      if (!/^\d{11}$/.test(contactNumber)) {
-        return res.status(400).json({ msg: 'Contact number must be exactly 11 digits' });
+      if (!isValidPhilippineMobile(contactNumber)) {
+        return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
       }
       const phoneExists = await User.findOne({ contactNumber, _id: { $ne: req.user.id } });
       if (phoneExists) return res.status(400).json({ msg: 'Phone number is already registered.' });
