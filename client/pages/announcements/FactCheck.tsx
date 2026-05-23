@@ -26,6 +26,8 @@ type RumorAttachment = {
   dataUrl: string;
 };
 
+const PHONE_PATTERN = /^09\d{9}$/;
+
 export default function FactCheck() {
   const [filter, setFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -118,6 +120,14 @@ export default function FactCheck() {
     e.preventDefault();
     if (!claim.trim() || !reporter.fullName.trim() || !reporter.contactNumber.trim() || !reporter.address.trim()) {
       setFeedback({ isOpen: true, title: 'Missing Details', message: 'Please complete your name, contact number, address, and the rumor details.', type: 'error' });
+      return;
+    }
+    if (!PHONE_PATTERN.test(reporter.contactNumber.trim())) {
+      setFeedback({ isOpen: true, title: 'Invalid Contact', message: 'Phone number must be 11 digits and start with 09.', type: 'error' });
+      return;
+    }
+    if (claim.trim().length < 10) {
+      setFeedback({ isOpen: true, title: 'More Details Needed', message: 'Please enter at least 10 characters for the rumor or claim.', type: 'error' });
       return;
     }
 
@@ -250,7 +260,7 @@ export default function FactCheck() {
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Contact Number</label>
-                    <input required type="text" value={reporter.contactNumber} onChange={(e) => setReporter((p) => ({ ...p, contactNumber: e.target.value }))} placeholder="09..." className="w-full p-4 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#638ECB] text-sm" />
+                    <input required type="tel" inputMode="numeric" pattern="09[0-9]{9}" maxLength={11} value={reporter.contactNumber} onChange={(e) => setReporter((p) => ({ ...p, contactNumber: e.target.value.replace(/\D/g, "").slice(0, 11) }))} placeholder="09..." className="w-full p-4 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#638ECB] text-sm" />
                   </div>
                 </div>
                 <div>

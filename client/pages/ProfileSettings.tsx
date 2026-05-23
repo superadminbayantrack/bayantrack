@@ -290,7 +290,9 @@ export default function ProfileSettings() {
       setFeedback({ isOpen: true, title: "Invalid Contact", message: "Phone number must be 11 digits and start with 09.", type: "error" });
       return;
     }
-    if (!emailPattern.test(formData.email)) {
+    const normalizedEmail = formData.email.trim().toLowerCase();
+
+    if (!emailPattern.test(normalizedEmail)) {
       setFeedback({ isOpen: true, title: "Invalid Email", message: "Please keep a valid registered email address.", type: "error" });
       return;
     }
@@ -303,7 +305,7 @@ export default function ProfileSettings() {
       return;
     }
 
-    const isEmailChanged = false;
+    const isEmailChanged = normalizedEmail !== (originalEmail || "").trim().toLowerCase();
     const isPasswordChanged = Boolean(formData.newPassword);
 
     if (isEmailChanged && !emailOtp) {
@@ -311,7 +313,7 @@ export default function ProfileSettings() {
       try {
         await api.post(
           "/api/auth/change-email/request-otp",
-          { newEmail: formData.email },
+          { newEmail: normalizedEmail },
           { headers: authHeaders() },
         );
         setShowEmailOtpModal(true);
@@ -349,6 +351,7 @@ export default function ProfileSettings() {
           firstName: formData.firstName,
           middleName: formData.middleName,
           lastName: formData.lastName,
+          ...(isEmailChanged ? { email: normalizedEmail, emailOtp } : {}),
           contactNumber: formData.contactNumber,
           avatarImage: formData.avatarImage,
           gender: formData.gender,
@@ -636,7 +639,7 @@ export default function ProfileSettings() {
                       </div>
                       <div className="space-y-1.5">
                         <label className="block text-xs font-bold text-gray-800">Email</label>
-                        <input className="w-full rounded-md border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-700" name="email" value={formData.email} readOnly />
+                        <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" type="email" autoComplete="email" name="email" value={formData.email} onChange={handleInputChange} />
                       </div>
                       <div className="space-y-1.5">
                         <label className="block text-xs font-bold text-gray-800">Contact Number</label>
@@ -1027,7 +1030,7 @@ export default function ProfileSettings() {
             <p className="mb-3 text-sm text-slate-600">Enter the 6-digit OTP sent to <span className="font-semibold">{formData.email}</span>.</p>
             <input
               value={emailOtp}
-              onChange={(e) => setEmailOtp(e.target.value)}
+              onChange={(e) => setEmailOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
               maxLength={6}
               placeholder="123456"
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-center tracking-[0.3em]"

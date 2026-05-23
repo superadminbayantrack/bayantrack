@@ -28,6 +28,13 @@ type Department = {
   localNumber: string;
 };
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const PHONE_PATTERN = /^09\d{9}$/;
+const isValidContact = (value: string) => {
+  const contact = value.trim();
+  return EMAIL_PATTERN.test(contact) || PHONE_PATTERN.test(contact);
+};
+
 export default function Contact() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [siteContent, setSiteContent] = useState<{ contactOfficeHours: string; contactLocationText: string }>({
@@ -76,8 +83,10 @@ export default function Contact() {
     const nextErrors: Record<string, string> = {};
     if (!form.name.trim()) nextErrors.name = 'Name is required.';
     if (!form.contact.trim()) nextErrors.contact = 'Contact is required.';
+    else if (!isValidContact(form.contact)) nextErrors.contact = 'Use a valid email address or an 11-digit number that starts with 09.';
     if (!form.department.trim()) nextErrors.department = 'Department is required.';
     if (!form.message.trim()) nextErrors.message = 'Message is required.';
+    else if (form.message.trim().length < 10) nextErrors.message = 'Message must be at least 10 characters.';
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
@@ -178,7 +187,7 @@ export default function Contact() {
                   </div>
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-600">Email / Phone</label>
-                    <input className="w-full rounded-lg border px-3 py-2" value={form.contact} onChange={(e) => setForm((p) => ({ ...p, contact: e.target.value }))} />
+                    <input className="w-full rounded-lg border px-3 py-2" autoComplete="email" placeholder="email@example.com or 09XXXXXXXXX" value={form.contact} onChange={(e) => setForm((p) => ({ ...p, contact: e.target.value }))} />
                     {errors.contact && <p className="mt-1 text-xs text-red-600">{errors.contact}</p>}
                   </div>
                   <div>

@@ -5,6 +5,7 @@ import { Reveal } from "@/components/Reveal";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, CheckCircle, Clock, FileText, History, Search, X } from "lucide-react";
 import { api, authHeaders } from "@/lib/api";
+import { hasAuthSession } from "@/lib/auth";
 import { FeedbackModal } from "@/components/FeedbackModal";
 
 type ServiceCatalog = {
@@ -120,15 +121,23 @@ export default function Services() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [catalogRes, historyRes, contentRes] = await Promise.all([
+      const [catalogRes, contentRes] = await Promise.all([
         api.get("/api/services/catalog"),
-        api.get("/api/services/requests/me", { headers: authHeaders() }),
         api.get("/api/content/site"),
       ]);
       const incoming = Array.isArray(catalogRes.data) ? catalogRes.data : [];
       const byCode = new Map(incoming.map((item: ServiceCatalog) => [item.code, item]));
       setServices(REQUIRED_SERVICES.map((svc) => byCode.get(svc.code) || svc));
-      setHistory(historyRes.data || []);
+      if (hasAuthSession()) {
+        try {
+          const historyRes = await api.get("/api/services/requests/me", { headers: authHeaders() });
+          setHistory(Array.isArray(historyRes.data) ? historyRes.data : []);
+        } catch {
+          setHistory([]);
+        }
+      } else {
+        setHistory([]);
+      }
       setContent((prev) => ({
         servicesHeroTitle: contentRes?.data?.servicesHeroTitle || prev.servicesHeroTitle,
         servicesHeroSubtitle: contentRes?.data?.servicesHeroSubtitle || prev.servicesHeroSubtitle,
@@ -147,6 +156,14 @@ export default function Services() {
   const submitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeCode) return;
+    if (!hasAuthSession()) {
+      setFeedback({ isOpen: true, title: "Login Required", message: "Please log in as a resident before submitting a service request.", type: "error" });
+      return;
+    }
+    if (!/^09\d{9}$/.test(formData.contactNumber)) {
+      setFeedback({ isOpen: true, title: "Invalid Contact", message: "Phone number must be 11 digits and start with 09.", type: "error" });
+      return;
+    }
     setIsSubmitting(true);
     setSubmitProgress(25);
 
@@ -183,6 +200,10 @@ export default function Services() {
 
   const trackRequest = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!hasAuthSession()) {
+      setFeedback({ isOpen: true, title: "Login Required", message: "Please log in as a resident before tracking private request records.", type: "error" });
+      return;
+    }
     setIsTracking(true);
     setTrackProgress(30);
     try {
@@ -284,6 +305,10 @@ export default function Services() {
                     idx === 2 ? "md:col-span-2 md:w-full md:max-w-2xl md:justify-self-center" : ""
                   }`}
                   onClick={() => {
+                    if (!hasAuthSession()) {
+                      setFeedback({ isOpen: true, title: "Login Required", message: "Please log in as a resident before starting a barangay service request.", type: "error" });
+                      return;
+                    }
                     setActiveCode(service.code);
                     setShowRequestModal(true);
                   }}
@@ -337,7 +362,7 @@ export default function Services() {
                 {isSubmitting && <div className="mt-3"><p className="mb-1 text-xs text-slate-500">Submitting request... {submitProgress}%</p><div className="h-2 rounded bg-slate-200"><div className="h-2 rounded bg-emerald-600 transition-all" style={{ width: `${submitProgress}%` }} /></div></div>}
                 <form className="mt-6 space-y-3" onSubmit={submitRequest}>
                   <input required className="w-full rounded-lg border px-3 py-2" placeholder="Full Name" value={formData.fullName} onChange={(e) => setFormData((p) => ({ ...p, fullName: e.target.value }))} />
-                  <input required className="w-full rounded-lg border px-3 py-2" placeholder="Contact Number" value={formData.contactNumber} onChange={(e) => setFormData((p) => ({ ...p, contactNumber: e.target.value }))} />
+                  <input required className="w-full rounded-lg border px-3 py-2" placeholder="09XXXXXXXXX" type="tel" inputMode="numeric" pattern="09[0-9]{9}" maxLength={11} value={formData.contactNumber} onChange={(e) => setFormData((p) => ({ ...p, contactNumber: e.target.value.replace(/\D/g, "").slice(0, 11) }))} />
                   <input required className="w-full rounded-lg border px-3 py-2" placeholder="Address" value={formData.address} onChange={(e) => setFormData((p) => ({ ...p, address: e.target.value }))} />
                   <select required className="w-full rounded-lg border px-3 py-2" value={formData.purpose} onChange={(e) => setFormData((p) => ({ ...p, purpose: e.target.value }))}>
                     <option value="">Purpose of Request</option>

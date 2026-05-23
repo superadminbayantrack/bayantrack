@@ -7,6 +7,8 @@ import { Footer } from "@/components/Footer";
 import { api, authHeaders } from '@/lib/api';
 import { FeedbackModal } from "@/components/FeedbackModal";
 
+const PHONE_PATTERN = /^09\d{9}$/;
+
 export default function ReportIssue() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
@@ -38,7 +40,10 @@ export default function ReportIssue() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({
+      ...prev,
+      [name]: name === "contactNumber" ? value.replace(/\D/g, "").slice(0, 11) : value,
+    }));
   };
 
   const handleAttachmentUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -66,6 +71,14 @@ export default function ReportIssue() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!PHONE_PATTERN.test(formData.contactNumber)) {
+      setFeedback({ isOpen: true, title: "Invalid Contact", message: "Phone number must be 11 digits and start with 09.", type: "error" });
+      return;
+    }
+    if (formData.description.trim().length < 10) {
+      setFeedback({ isOpen: true, title: "More Details Needed", message: "Please enter at least 10 characters in the report description.", type: "error" });
+      return;
+    }
     setIsSubmitting(true);
     setSubmitProgress(20);
 
@@ -114,7 +127,7 @@ export default function ReportIssue() {
                 </div>
                 <div>
                   <label className="mb-1.5 block text-sm font-bold text-gray-900">Contact Number</label>
-                  <input required className="w-full rounded-md border border-gray-300 p-3" name="contactNumber" value={formData.contactNumber} onChange={handleInputChange} />
+                  <input required className="w-full rounded-md border border-gray-300 p-3" type="tel" inputMode="numeric" pattern="09[0-9]{9}" maxLength={11} name="contactNumber" value={formData.contactNumber} onChange={handleInputChange} />
                 </div>
               </div>
 
