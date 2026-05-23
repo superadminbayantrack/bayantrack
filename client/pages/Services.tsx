@@ -22,7 +22,10 @@ type ServiceRequest = {
   serviceType: string;
   status: string;
   createdAt: string;
+  updatedAt?: string;
 };
+
+const HISTORY_PAGE_SIZE = 5;
 
 const REQUIRED_SERVICES: ServiceCatalog[] = [
   {
@@ -68,6 +71,10 @@ export default function Services() {
   const [loading, setLoading] = useState(true);
   const [showTrackModal, setShowTrackModal] = useState(false);
   const [showRequestModal, setShowRequestModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historySortOrder, setHistorySortOrder] = useState<"newest" | "oldest">("newest");
+  const [historyPage, setHistoryPage] = useState(1);
   const [trackRef, setTrackRef] = useState("");
   const [tracked, setTracked] = useState<ServiceRequest | null>(null);
   const [formData, setFormData] = useState({ fullName: "", contactNumber: "", address: "", purpose: "" });
@@ -83,6 +90,32 @@ export default function Services() {
   });
 
   const activeService = useMemo(() => services.find((s) => s.code === activeCode), [activeCode, services]);
+  const sortedHistory = useMemo(() => (
+    [...history].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+  ), [history]);
+  const previewHistory = sortedHistory.slice(0, 3);
+  const visiblePreviewHistory = previewHistory.slice(0, 1);
+  const blurredPreviewHistory = previewHistory.slice(1);
+  const extraHistoryCount = Math.max(0, sortedHistory.length - previewHistory.length);
+  const filteredHistory = useMemo(() => {
+    const query = historySearch.trim().toLowerCase();
+    return sortedHistory
+      .filter((item) => !query || [item.referenceNo, item.serviceType, item.status].some((value) => String(value || "").toLowerCase().includes(query)))
+      .sort((a, b) => {
+        const diff = new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        return historySortOrder === "newest" ? diff : -diff;
+      });
+  }, [historySearch, historySortOrder, sortedHistory]);
+  const historyTotalPages = Math.max(1, Math.ceil(filteredHistory.length / HISTORY_PAGE_SIZE));
+  const currentHistoryPage = Math.min(historyPage, historyTotalPages);
+  const paginatedHistory = filteredHistory.slice(
+    (currentHistoryPage - 1) * HISTORY_PAGE_SIZE,
+    currentHistoryPage * HISTORY_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [historySearch, historySortOrder]);
 
   const loadData = async () => {
     setLoading(true);
@@ -200,15 +233,42 @@ export default function Services() {
             </div>
             <div className="rounded-xl border border-slate-200 bg-white p-6">
               <div className="mb-3 inline-flex rounded-md bg-blue-50 p-2 text-blue-700"><History size={18} /></div>
-              <h3 className="text-lg font-semibold text-slate-900">Request History</h3>
-              <p className="mt-1 text-sm text-slate-600">Your latest submitted requests.</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">Request History</h3>
+                  <p className="mt-1 text-sm text-slate-600">Your latest submitted requests.</p>
+                </div>
+                {sortedHistory.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHistoryPage(1);
+                      setShowHistoryModal(true);
+                    }}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    View All
+                  </button>
+                ) : null}
+              </div>
               <div className="mt-4 space-y-2 text-sm">
-                {history.slice(0, 4).map((item) => (
+                {visiblePreviewHistory.map((item) => (
                   <div key={item._id} className="rounded border border-slate-200 p-2">
                     <p className="font-semibold text-slate-900">{item.referenceNo}</p>
                     <p className="text-slate-500">{item.serviceType} • {item.status}</p>
                   </div>
                 ))}
+                {blurredPreviewHistory.map((item) => (
+                  <div key={item._id} className="pointer-events-none rounded border border-slate-200 bg-slate-50 p-2 opacity-70 blur-[1px]">
+                    <p className="font-semibold text-slate-900">{item.referenceNo}</p>
+                    <p className="text-slate-500">{item.serviceType} • {item.status}</p>
+                  </div>
+                ))}
+                {extraHistoryCount > 0 ? (
+                  <div className="rounded border border-dashed border-slate-200 bg-slate-50 p-2 text-center text-xs text-slate-500">
+                    +{extraHistoryCount} more requests in View All
+                  </div>
+                ) : null}
                 {history.length === 0 && <p className="text-slate-500">No requests yet.</p>}
               </div>
             </div>
@@ -304,6 +364,106 @@ export default function Services() {
                 </div>
               </aside>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showHistoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[88vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-500">Resident service records</p>
+                <h3 className="text-xl font-bold text-slate-900">Request History</h3>
+                <p className="mt-1 text-sm text-slate-500">Search and review your submitted barangay service requests.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowHistoryModal(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-50"
+                aria-label="Close request history"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr,220px]">
+              <div className="relative">
+                <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  placeholder="Search reference, service, or status..."
+                  className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400"
+                />
+              </div>
+              <select
+                value={historySortOrder}
+                onChange={(e) => setHistorySortOrder(e.target.value as "newest" | "oldest")}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-400"
+              >
+                <option value="newest">Newest date/time first</option>
+                <option value="oldest">Oldest date/time first</option>
+              </select>
+            </div>
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Reference</th>
+                    <th className="px-4 py-3 font-semibold">Service</th>
+                    <th className="px-4 py-3 font-semibold">Date</th>
+                    <th className="px-4 py-3 font-semibold">Time</th>
+                    <th className="px-4 py-3 font-semibold">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedHistory.map((item) => {
+                    const date = new Date(item.createdAt);
+                    const invalidDate = Number.isNaN(date.getTime());
+                    return (
+                      <tr key={item._id} className="border-t border-slate-200 align-top">
+                        <td className="px-4 py-3 font-semibold text-slate-900">{item.referenceNo}</td>
+                        <td className="px-4 py-3 text-slate-700">{item.serviceType}</td>
+                        <td className="px-4 py-3 text-slate-600">{invalidDate ? "N/A" : date.toLocaleDateString()}</td>
+                        <td className="px-4 py-3 text-slate-600">{invalidDate ? "N/A" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
+                        <td className="px-4 py-3">
+                          <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">{item.status}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {filteredHistory.length === 0 ? <p className="p-5 text-sm text-slate-500">No request matched the selected search.</p> : null}
+            </div>
+            {filteredHistory.length > 0 ? (
+              <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs font-semibold text-slate-500">
+                  Showing {(currentHistoryPage - 1) * HISTORY_PAGE_SIZE + 1}-{Math.min(currentHistoryPage * HISTORY_PAGE_SIZE, filteredHistory.length)} of {filteredHistory.length}
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={currentHistoryPage <= 1}
+                    onClick={() => setHistoryPage((page) => Math.max(1, page - 1))}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <span className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-700">
+                    Page {currentHistoryPage} of {historyTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={currentHistoryPage >= historyTotalPages}
+                    onClick={() => setHistoryPage((page) => Math.min(historyTotalPages, page + 1))}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       )}

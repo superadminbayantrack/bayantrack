@@ -13,6 +13,7 @@ type FilterPanel = "users" | "announcements" | "reports" | "emergencyAlerts" | "
 type MonthlyDetailKind = "users" | "services" | "reports" | "messages";
 type RatingRange = "days" | "weeks" | "months" | "years";
 const MONTHLY_DETAIL_PAGE_SIZE = 5;
+const DASHBOARD_PAGE_SIZE = 5;
 type TableFilterState = { search: string; date: string; time: string };
 type MobileDashboardAction = { label: string; run: () => void; tone?: "default" | "danger" };
 type PermissionFlags = { view: boolean; add: boolean; edit: boolean; archive: boolean; delete: boolean };
@@ -607,6 +608,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [notificationCategory, setNotificationCategory] = useState("all");
   const [monthlyDetailModal, setMonthlyDetailModal] = useState<MonthlyDetailKind | null>(null);
   const [monthlyDetailPage, setMonthlyDetailPage] = useState(1);
+  const [dashboardPages, setDashboardPages] = useState<Record<string, number>>({});
   const [ratingDetailOpen, setRatingDetailOpen] = useState(false);
   const [ratingRange, setRatingRange] = useState<RatingRange>("days");
   const [mobileActionMenu, setMobileActionMenu] = useState<{ title: string; actions: MobileDashboardAction[] } | null>(null);
@@ -1320,6 +1322,33 @@ export default function RoleDashboard({ role }: DashboardProps) {
     { value: "subscribers", label: "Subscribers", count: archivedSubscriptions.length },
   ];
   const selectedRestore = restoreCategoryOptions.find((item) => item.value === restoreCategory) || restoreCategoryOptions[0];
+  const paginateDashboardItems = <T,>(key: string, items: T[]) => {
+    const totalPages = Math.max(1, Math.ceil(items.length / DASHBOARD_PAGE_SIZE));
+    const currentPage = Math.min(Math.max(1, dashboardPages[key] || 1), totalPages);
+    return {
+      items: items.slice((currentPage - 1) * DASHBOARD_PAGE_SIZE, currentPage * DASHBOARD_PAGE_SIZE),
+      currentPage,
+      totalPages,
+      total: items.length,
+    };
+  };
+  const paginatedUsers = paginateDashboardItems("users", filteredUsers);
+  const paginatedOfficials = paginateDashboardItems("officials", filteredOfficials);
+  const paginatedAnnouncements = paginateDashboardItems("announcements", filteredAnnouncements);
+  const paginatedReports = paginateDashboardItems("reports", filteredReports);
+  const paginatedEmergencyAlerts = paginateDashboardItems("emergencyAlerts", filteredEmergencyAlerts);
+  const paginatedServices = paginateDashboardItems("services", filteredServices);
+  const paginatedMessages = paginateDashboardItems("messages", filteredMessages);
+  const paginatedSubscriptions = paginateDashboardItems("subscriptions", filteredSubscriptions);
+  const paginatedAdminNotifications = paginateDashboardItems("systemNotifications", filteredAdminNotifications);
+  const paginatedActivities = paginateDashboardItems("adminActivities", filteredActivities);
+  const paginatedArchivedUsers = paginateDashboardItems("restore-users", archivedUsers);
+  const paginatedArchivedOfficials = paginateDashboardItems("restore-officials", archivedOfficials);
+  const paginatedArchivedAnnouncements = paginateDashboardItems("restore-announcements", archivedAnnouncements);
+  const paginatedArchivedReports = paginateDashboardItems("restore-reports", archivedReports);
+  const paginatedArchivedServices = paginateDashboardItems("restore-services", archivedServices);
+  const paginatedArchivedMessages = paginateDashboardItems("restore-messages", archivedMessages);
+  const paginatedArchivedSubscriptions = paginateDashboardItems("restore-subscribers", archivedSubscriptions);
 
   const hasModulePermission = (moduleKey: keyof AdminPermissions, action: keyof PermissionFlags) => {
     if (role === "superadmin") return true;
@@ -1880,6 +1909,39 @@ export default function RoleDashboard({ role }: DashboardProps) {
       [{ label: "Restore", run }],
     );
   };
+  const renderDashboardPagination = (key: string, page: { currentPage: number; totalPages: number; total: number }) => {
+    if (page.total === 0) return null;
+    const start = (page.currentPage - 1) * DASHBOARD_PAGE_SIZE + 1;
+    const end = Math.min(page.currentPage * DASHBOARD_PAGE_SIZE, page.total);
+    return (
+      <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-semibold text-slate-500">
+          Showing {start}-{end} of {page.total}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={page.currentPage <= 1}
+            onClick={() => setDashboardPages((prev) => ({ ...prev, [key]: Math.max(1, page.currentPage - 1) }))}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <span className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-700">
+            Page {page.currentPage} of {page.totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={page.currentPage >= page.totalPages}
+            onClick={() => setDashboardPages((prev) => ({ ...prev, [key]: Math.min(page.totalPages, page.currentPage + 1) }))}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   const handlerOptions = useMemo<HandlerOption[]>(() => {
     const userFullName = (user: UserItem) =>
@@ -2393,7 +2455,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredUsers.map((user) => (
+                    {paginatedUsers.items.map((user) => (
                       <tr key={user._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3">
                           <div className="font-semibold text-slate-900">{[user.firstName, user.middleName, user.lastName].filter(Boolean).join(" ") || "N/A"}</div>
@@ -2454,6 +2516,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {filteredUsers.length === 0 && <p className="mt-2 text-sm text-slate-500">No users in this category.</p>}
+              {renderDashboardPagination("users", paginatedUsers)}
             </section>
           )}
 
@@ -2478,7 +2541,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredOfficials.map((o) => (
+                    {paginatedOfficials.items.map((o) => (
                       <tr key={o._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3">
                           <div className="flex min-w-0 items-center gap-3">
@@ -2521,6 +2584,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {filteredOfficials.length === 0 && <p className="mt-2 text-sm text-slate-500">No officials in this category.</p>}
+              {renderDashboardPagination("officials", paginatedOfficials)}
             </section>
           )}
 
@@ -2553,7 +2617,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredAnnouncements.map((a) => (
+                    {paginatedAnnouncements.items.map((a) => (
                       <tr key={a._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3">
                           <div className="min-w-0">
@@ -2607,6 +2671,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {filteredAnnouncements.length === 0 && <p className="mt-2 text-sm text-slate-500">No announcements in this category.</p>}
+              {renderDashboardPagination("announcements", paginatedAnnouncements)}
             </section>
           )}
           {activePanel === "reports" && (
@@ -2637,7 +2702,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredReports.map((r) => (
+                    {paginatedReports.items.map((r) => (
                       <tr key={r._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">{r.referenceNo}</td>
                         <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(r.createdAt)}</td>
@@ -2693,6 +2758,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {filteredReports.length === 0 && <p className="mt-2 text-sm text-slate-500">No reports in this category.</p>}
+              {renderDashboardPagination("reports", paginatedReports)}
             </section>
           )}
           {activePanel === "emergencyAlerts" && (
@@ -2720,7 +2786,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredEmergencyAlerts.map((alert) => {
+                    {paginatedEmergencyAlerts.items.map((alert) => {
                       const resident = alert.residentSnapshot || {};
                       const mapUrl = googleMapsUrl(alert.currentLocation);
                       return (
@@ -2850,6 +2916,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {filteredEmergencyAlerts.length === 0 && <p className="mt-2 text-sm text-slate-500">No live alerts found.</p>}
+              {renderDashboardPagination("emergencyAlerts", paginatedEmergencyAlerts)}
             </section>
           )}
           {activePanel === "services" && (
@@ -2880,7 +2947,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredServices.map((s) => (
+                    {paginatedServices.items.map((s) => (
                       <tr key={s._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">{s.referenceNo}</td>
                         <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(s.createdAt)}</td>
@@ -2925,6 +2992,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {filteredServices.length === 0 && <p className="mt-2 text-sm text-slate-500">No service requests in this category.</p>}
+              {renderDashboardPagination("services", paginatedServices)}
             </section>
           )}
           {activePanel === "messages" && (
@@ -2948,7 +3016,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredMessages.map((m) => (
+                    {paginatedMessages.items.map((m) => (
                       <tr key={m._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">{m.referenceNo}</td>
                         <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(m.createdAt)}</td>
@@ -2993,6 +3061,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {filteredMessages.length === 0 && <p className="mt-2 text-sm text-slate-500">No messages in this category.</p>}
+              {renderDashboardPagination("messages", paginatedMessages)}
               <div className="mt-4 flex justify-end">
                 <button className={btnSecondary} onClick={() => setShowClosedMessagesModal(true)} type="button">
                   View Closed Messages ({closedMessages.length})
@@ -3020,7 +3089,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredSubscriptions.map((sub) => (
+                    {paginatedSubscriptions.items.map((sub) => (
                       <tr key={sub._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">
                           <div className="min-w-[260px] space-y-2">
@@ -3063,6 +3132,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </table>
               </div>
               {filteredSubscriptions.length === 0 && <p className="mt-2 text-sm text-slate-500">No subscribers in this category.</p>}
+              {renderDashboardPagination("subscriptions", paginatedSubscriptions)}
             </section>
           )}
 
@@ -3136,7 +3206,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <tr><th className="px-4 py-3 font-semibold">Name</th><th className="px-4 py-3 font-semibold">Username</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Restore</th></tr>
                       </thead>
                       <tbody>
-                        {archivedUsers.map((user) => (
+                        {paginatedArchivedUsers.items.map((user) => (
                           <tr key={user._id} className="border-t border-slate-200">
                             <td className="px-4 py-3"><p className="font-semibold text-slate-900">{[user.firstName, user.middleName, user.lastName].filter(Boolean).join(" ") || "N/A"}</p><p className="text-xs text-slate-500">{user.email}</p></td>
                             <td className="px-4 py-3 text-slate-700">{user.username}</td>
@@ -3148,6 +3218,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </table>
                   </div>
                   {archivedUsers.length === 0 && <p className="mt-2 text-sm text-slate-500">No archived users.</p>}
+                  {renderDashboardPagination("restore-users", paginatedArchivedUsers)}
                 </div>
 
                 <div className={restoreCategory === "officials" ? "" : "hidden"}>
@@ -3158,7 +3229,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <tr><th className="px-4 py-3 font-semibold">Official</th><th className="px-4 py-3 font-semibold">Role</th><th className="px-4 py-3 font-semibold">Restore</th></tr>
                       </thead>
                       <tbody>
-                        {archivedOfficials.map((item) => (
+                        {paginatedArchivedOfficials.items.map((item) => (
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.name}</td>
                             <td className="px-4 py-3 text-slate-700">{item.role}</td>
@@ -3169,6 +3240,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </table>
                   </div>
                   {archivedOfficials.length === 0 && <p className="mt-2 text-sm text-slate-500">No archived officials.</p>}
+                  {renderDashboardPagination("restore-officials", paginatedArchivedOfficials)}
                 </div>
 
                 <div className={restoreCategory === "announcements" ? "" : "hidden"}>
@@ -3179,7 +3251,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <tr><th className="px-4 py-3 font-semibold">Title</th><th className="px-4 py-3 font-semibold">Module</th><th className="px-4 py-3 font-semibold">Restore</th></tr>
                       </thead>
                       <tbody>
-                        {archivedAnnouncements.map((item) => (
+                        {paginatedArchivedAnnouncements.items.map((item) => (
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.title}</td>
                             <td className="px-4 py-3 text-slate-700">{item.module}</td>
@@ -3190,6 +3262,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </table>
                   </div>
                   {archivedAnnouncements.length === 0 && <p className="mt-2 text-sm text-slate-500">No archived announcements.</p>}
+                  {renderDashboardPagination("restore-announcements", paginatedArchivedAnnouncements)}
                 </div>
 
                 <div className={restoreCategory === "reports" ? "" : "hidden"}>
@@ -3200,7 +3273,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <tr><th className="px-4 py-3 font-semibold">Reference</th><th className="px-4 py-3 font-semibold">Category</th><th className="px-4 py-3 font-semibold">Restore</th></tr>
                       </thead>
                       <tbody>
-                        {archivedReports.map((item) => (
+                        {paginatedArchivedReports.items.map((item) => (
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.referenceNo}</td>
                             <td className="px-4 py-3 text-slate-700">{item.category}</td>
@@ -3211,6 +3284,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </table>
                   </div>
                   {archivedReports.length === 0 && <p className="mt-2 text-sm text-slate-500">No archived reports.</p>}
+                  {renderDashboardPagination("restore-reports", paginatedArchivedReports)}
                 </div>
 
                 <div className={restoreCategory === "services" ? "" : "hidden"}>
@@ -3221,7 +3295,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <tr><th className="px-4 py-3 font-semibold">Reference</th><th className="px-4 py-3 font-semibold">Service</th><th className="px-4 py-3 font-semibold">Restore</th></tr>
                       </thead>
                       <tbody>
-                        {archivedServices.map((item) => (
+                        {paginatedArchivedServices.items.map((item) => (
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.referenceNo}</td>
                             <td className="px-4 py-3 text-slate-700">{item.serviceType}</td>
@@ -3232,6 +3306,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </table>
                   </div>
                   {archivedServices.length === 0 && <p className="mt-2 text-sm text-slate-500">No archived service requests.</p>}
+                  {renderDashboardPagination("restore-services", paginatedArchivedServices)}
                 </div>
 
                 <div className={restoreCategory === "messages" ? "" : "hidden"}>
@@ -3242,7 +3317,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <tr><th className="px-4 py-3 font-semibold">Reference</th><th className="px-4 py-3 font-semibold">Sender</th><th className="px-4 py-3 font-semibold">Restore</th></tr>
                       </thead>
                       <tbody>
-                        {archivedMessages.map((item) => (
+                        {paginatedArchivedMessages.items.map((item) => (
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.referenceNo}</td>
                             <td className="px-4 py-3 text-slate-700">{item.name}</td>
@@ -3253,6 +3328,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </table>
                   </div>
                   {archivedMessages.length === 0 && <p className="mt-2 text-sm text-slate-500">No archived messages.</p>}
+                  {renderDashboardPagination("restore-messages", paginatedArchivedMessages)}
                 </div>
 
                 <div className={restoreCategory === "subscribers" ? "" : "hidden"}>
@@ -3263,7 +3339,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                         <tr><th className="px-4 py-3 font-semibold">Email</th><th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Restore</th></tr>
                       </thead>
                       <tbody>
-                        {archivedSubscriptions.map((item) => (
+                        {paginatedArchivedSubscriptions.items.map((item) => (
                           <tr key={item._id} className="border-t border-slate-200">
                             <td className="px-4 py-3 font-semibold text-slate-900">{item.email}</td>
                             <td className="px-4 py-3"><Badge value={item.status} /></td>
@@ -3274,6 +3350,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     </table>
                   </div>
                   {archivedSubscriptions.length === 0 && <p className="mt-2 text-sm text-slate-500">No archived subscribers.</p>}
+                  {renderDashboardPagination("restore-subscribers", paginatedArchivedSubscriptions)}
                 </div>
               </div>
               ) : null}
@@ -3405,7 +3482,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               </div>
               <CategoryFilter title="Notification Groups" options={notificationCategoryOptions} value={notificationCategory} onChange={setNotificationCategory} />
               <div className="space-y-3">
-                {filteredAdminNotifications.map((item) => (
+                {paginatedAdminNotifications.items.map((item) => (
                   <div key={item._id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
@@ -3424,6 +3501,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 ))}
                 {filteredAdminNotifications.length === 0 ? <p className="text-sm text-slate-500">No notifications in this group.</p> : null}
               </div>
+              {renderDashboardPagination("systemNotifications", paginatedAdminNotifications)}
             </section>
           )}
 
@@ -3449,7 +3527,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <PanelSearchFilters value={tableFilters.audit} onChange={(next) => updateTableFilter("audit", next)} placeholder="Search activity logs..." />
               <CategoryFilter title="Role Categories" options={activityRoleOptions} value={activityRoleCategory} onChange={setActivityRoleCategory} />
               <div className={moduleGrid}>
-                {filteredActivities.map((a) => (
+                {paginatedActivities.items.map((a) => (
                   <div key={a._id} className={moduleCard}>
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <Badge value={a.userRole || "unknown"} />
@@ -3463,6 +3541,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 ))}
               </div>
               {filteredActivities.length === 0 && <p className="text-sm text-slate-500">No activity found in this category.</p>}
+              {renderDashboardPagination("adminActivities", paginatedActivities)}
             </section>
           )}
         </main>
