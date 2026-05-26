@@ -15,6 +15,7 @@ type RatingRange = "days" | "weeks" | "months" | "years";
 type SnapshotModal = "activities" | "queue" | null;
 const MONTHLY_DETAIL_PAGE_SIZE = 5;
 const DASHBOARD_PAGE_SIZE = 5;
+const SNAPSHOT_PAGE_SIZE = 3;
 const DEFAULT_ANNOUNCEMENT_FORM = {
   title: "",
   content: "",
@@ -30,6 +31,7 @@ const DEFAULT_ANNOUNCEMENT_FORM = {
 const ANNOUNCEMENT_STATUS_OPTIONS = ["published", "pending", "ongoing", "resolved", "cancelled"];
 type TableFilterState = { search: string; date: string; time: string };
 type MobileDashboardAction = { label: string; run: () => void; tone?: "default" | "danger" };
+type SnapshotActionTarget = { title: string; subtitle: string; panel: Panel };
 type PermissionFlags = { view: boolean; add: boolean; edit: boolean; archive: boolean; delete: boolean };
 type AdminPermissions = {
   officials: PermissionFlags;
@@ -199,7 +201,13 @@ function Badge({ value }: { value: string }) {
     : v === "pending" || v === "new" || v === "in-review"
       ? "bg-amber-100 text-amber-700"
       : "bg-red-100 text-red-700";
-  return <span className={`rounded-full px-2 py-1 text-xs font-semibold ${tone}`}>{value}</span>;
+  return <span className={`whitespace-nowrap rounded-full px-2 py-1 text-xs font-semibold ${tone}`}>{value}</span>;
+}
+
+function truncateText(value: string | undefined | null, max = 80) {
+  const text = String(value || "").trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
 }
 
 function childReviewProgress(status?: string) {
@@ -611,6 +619,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [ratingDetailOpen, setRatingDetailOpen] = useState(false);
   const [ratingRange, setRatingRange] = useState<RatingRange>("days");
   const [snapshotModal, setSnapshotModal] = useState<SnapshotModal>(null);
+  const [snapshotPage, setSnapshotPage] = useState(1);
+  const [snapshotActionTarget, setSnapshotActionTarget] = useState<SnapshotActionTarget | null>(null);
   const [mobileActionMenu, setMobileActionMenu] = useState<{ title: string; actions: MobileDashboardAction[] } | null>(null);
   const [restoreCategory, setRestoreCategory] = useState("users");
   const [reportSortOrder, setReportSortOrder] = useState<"newest" | "oldest">("newest");
@@ -835,8 +845,33 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const openSnapshotPanel = (panel: Panel) => {
     setActivePanel(panel);
     setSnapshotModal(null);
+    setSnapshotActionTarget(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const snapshotActivityItems = useMemo<SnapshotQueueItem[]>(() => (
+    activities.map((activity) => ({
+      id: `activity-${activity._id}`,
+      name: activity.userFullName || activity.userName || "System",
+      status: activity.userRole || activity.type || "activity",
+      action: activity.title,
+      createdAt: activity.createdAt,
+      panel: panelFromActivity(activity),
+    }))
+  ), [activities]);
+
+  const snapshotCurrentItems = snapshotModal === "activities" ? snapshotActivityItems : snapshotQueueItems;
+  const snapshotTotalPages = Math.max(1, Math.ceil(snapshotCurrentItems.length / SNAPSHOT_PAGE_SIZE));
+  const currentSnapshotPage = Math.min(snapshotPage, snapshotTotalPages);
+  const paginatedSnapshotItems = snapshotCurrentItems.slice(
+    (currentSnapshotPage - 1) * SNAPSHOT_PAGE_SIZE,
+    currentSnapshotPage * SNAPSHOT_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setSnapshotPage(1);
+    setSnapshotActionTarget(null);
+  }, [snapshotModal, snapshotActivityItems.length, snapshotQueueItems.length]);
 
   const chartServices = useMemo(() => {
     const map = new Map<string, number>();
@@ -2706,17 +2741,17 @@ export default function RoleDashboard({ role }: DashboardProps) {
                       <tr key={a._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3">
                           <div className="min-w-0">
-                            <p className="text-[15px] font-semibold leading-5 text-slate-900">{a.title}</p>
-                            <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-slate-500">{a.content || "No content provided."}</p>
+                            <p className="text-[15px] font-semibold leading-5 text-slate-900" title={a.title}>{truncateText(a.title, 68)}</p>
+                            <p className="mt-1 text-[12px] leading-5 text-slate-500" title={a.content || "No content provided."}>{truncateText(a.content || "No content provided.", 96)}</p>
                             {(a.eventDate || a.eventTime || a.location) && (
-                              <p className="mt-2 text-[11px] font-semibold text-slate-500">
-                                {[a.eventDate, a.eventTime, a.location].filter(Boolean).join(" | ")}
+                              <p className="mt-2 text-[11px] font-semibold text-slate-500" title={[a.eventDate, a.eventTime, a.location].filter(Boolean).join(" | ")}>
+                                {truncateText([a.eventDate, a.eventTime, a.location].filter(Boolean).join(" | "), 72)}
                               </p>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-[13px] leading-5 text-slate-700 break-words">{a.module}</td>
-                        <td className="px-4 py-3 text-[13px] leading-5 text-slate-700 break-words">{a.category}</td>
+                        <td className="px-4 py-3 text-[13px] leading-5 text-slate-700"><p className="truncate" title={a.module}>{a.module}</p></td>
+                        <td className="px-4 py-3 text-[13px] leading-5 text-slate-700"><p className="truncate" title={a.category}>{a.category}</p></td>
                         <td className="px-4 py-3 align-middle"><div className="w-fit"><Badge value={a.archived ? "archived" : a.status || "published"} /></div></td>
                         <td className="px-4 py-3">
                           {renderActionControls(`Announcement ${a.title}`, (
@@ -5094,7 +5129,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
 
       {snapshotModal && (
         <div className={modalOverlay}>
-          <div className={`${modalCard} max-w-3xl`}>
+          <div className={`${modalCard} max-w-5xl`}>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Daily Snapshot</p>
@@ -5105,10 +5140,17 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     : "Pending items that need admin attention."}
                 </p>
               </div>
-              <button className={iconBtn} onClick={() => setSnapshotModal(null)} type="button" title="Close snapshot" aria-label="Close snapshot"><X size={18} /></button>
+              <button className={iconBtn} onClick={() => { setSnapshotModal(null); setSnapshotActionTarget(null); }} type="button" title="Close snapshot" aria-label="Close snapshot"><X size={18} /></button>
             </div>
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="min-w-full text-left text-sm">
+              <table className="min-w-[920px] table-fixed text-left text-sm">
+                <colgroup>
+                  <col className="w-[24%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[32%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[10%]" />
+                </colgroup>
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-4 py-3 font-semibold">Name</th>
@@ -5119,39 +5161,64 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {snapshotModal === "activities" ? (
-                    activities.slice(0, 8).map((activity) => (
-                      <tr key={activity._id} className="border-t border-slate-200 align-top">
-                        <td className="px-4 py-3 font-semibold text-slate-900">{activity.userFullName || activity.userName || "System"}</td>
-                        <td className="px-4 py-3"><Badge value={activity.userRole || activity.type || "activity"} /></td>
-                        <td className="px-4 py-3 text-slate-600">{activity.title}</td>
-                        <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(activity.createdAt)}</td>
-                        <td className="px-4 py-3">
-                          <button className={iconBtn} onClick={() => openSnapshotPanel(panelFromActivity(activity))} type="button" title="View related records" aria-label="View related records">
-                            <MoreHorizontal size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    snapshotQueueItems.map((item) => (
-                      <tr key={item.id} className="border-t border-slate-200 align-top">
-                        <td className="px-4 py-3 font-semibold text-slate-900">{item.name}</td>
-                        <td className="px-4 py-3"><Badge value={item.status} /></td>
-                        <td className="px-4 py-3 text-slate-600">{item.action}</td>
-                        <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(item.createdAt)}</td>
-                        <td className="px-4 py-3">
-                          <button className={iconBtn} onClick={() => openSnapshotPanel(item.panel)} type="button" title="Handle this item" aria-label="Handle this item">
-                            <MoreHorizontal size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  {paginatedSnapshotItems.map((item) => (
+                    <tr key={item.id} className="border-t border-slate-200 align-top">
+                      <td className="px-4 py-3">
+                        <p className="truncate font-semibold text-slate-900" title={item.name}>{item.name}</p>
+                      </td>
+                      <td className="px-4 py-3"><Badge value={item.status} /></td>
+                      <td className="px-4 py-3">
+                        <p className="line-clamp-2 text-slate-600" title={item.action}>{item.action}</p>
+                      </td>
+                      <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(item.createdAt)}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          className={iconBtn}
+                          onClick={() => setSnapshotActionTarget({ title: item.name, subtitle: item.action, panel: item.panel })}
+                          type="button"
+                          title="Open item actions"
+                          aria-label="Open item actions"
+                        >
+                          <MoreHorizontal size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
               {snapshotModal === "activities" && activities.length === 0 && <p className="p-5 text-sm text-slate-500">No recent activities for this date.</p>}
               {snapshotModal === "queue" && snapshotQueueItems.length === 0 && <p className="p-5 text-sm text-slate-500">No pending queue items right now.</p>}
+            </div>
+            {snapshotCurrentItems.length > 0 && (
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs font-semibold text-slate-500">
+                  Showing {(currentSnapshotPage - 1) * SNAPSHOT_PAGE_SIZE + 1}-{Math.min(currentSnapshotPage * SNAPSHOT_PAGE_SIZE, snapshotCurrentItems.length)} of {snapshotCurrentItems.length}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button className={btnSecondary} onClick={() => setSnapshotPage((page) => Math.max(1, page - 1))} disabled={currentSnapshotPage <= 1} type="button">Previous</button>
+                  <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">Page {currentSnapshotPage} of {snapshotTotalPages}</span>
+                  <button className={btnSecondary} onClick={() => setSnapshotPage((page) => Math.min(snapshotTotalPages, page + 1))} disabled={currentSnapshotPage >= snapshotTotalPages} type="button">Next</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {snapshotActionTarget && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Snapshot Action</p>
+                <h3 className="mt-1 truncate text-lg font-bold text-slate-900" title={snapshotActionTarget.title}>{snapshotActionTarget.title}</h3>
+                <p className="mt-1 line-clamp-2 text-sm text-slate-500" title={snapshotActionTarget.subtitle}>{snapshotActionTarget.subtitle}</p>
+              </div>
+              <button className={iconBtn} onClick={() => setSnapshotActionTarget(null)} type="button" aria-label="Close snapshot action"><X size={18} /></button>
+            </div>
+            <div className="grid gap-2">
+              <button className={`${btnPrimary} w-full text-sm`} onClick={() => openSnapshotPanel(snapshotActionTarget.panel)} type="button">Take Action</button>
+              <button className={`${btnSecondary} w-full text-sm`} onClick={() => setSnapshotActionTarget(null)} type="button">Leave It</button>
             </div>
           </div>
         </div>
