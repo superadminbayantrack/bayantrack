@@ -4,9 +4,10 @@ import { Chatbot } from "@/components/Chatbot";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Calendar, Search } from "lucide-react";
 import { api } from "@/lib/api";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import { AnnouncementDetailModal, type AnnouncementDetailItem } from "@/components/AnnouncementDetailModal";
 
-type AnnouncementItem = {
+type AnnouncementItem = AnnouncementDetailItem & {
   _id: string;
   title: string;
   content: string;
@@ -28,12 +29,12 @@ const moduleOptions = [
 
 export default function Announcements() {
   const { category } = useParams();
-  const navigate = useNavigate();
   const [items, setItems] = useState<AnnouncementItem[]>([]);
   const [featured, setFeatured] = useState<AnnouncementItem[]>([]);
   const [activeModule, setActiveModule] = useState('all-news-updates');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState<AnnouncementItem | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -74,19 +75,6 @@ export default function Announcements() {
       return byModule && bySearch;
     });
   }, [activeModule, items, search]);
-
-  const getAnnouncementPath = (moduleKey: string) => {
-    const normalized = String(moduleKey || "").toLowerCase();
-    if (
-      normalized === "barangay-updates" ||
-      normalized === "emergency-hotlines" ||
-      normalized === "phivolcs-alerts" ||
-      normalized === "fact-check"
-    ) {
-      return `/announcements/${normalized}`;
-    }
-    return "/announcements";
-  };
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
@@ -135,6 +123,13 @@ export default function Announcements() {
                   <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Featured</p>
                   <h3 className="line-clamp-2 font-bold text-slate-900">{item.title}</h3>
                   <p className="mt-2 line-clamp-3 text-sm text-slate-600">{item.content}</p>
+                  <button
+                    type="button"
+                    className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-slate-900"
+                    onClick={() => setSelectedAnnouncement(item)}
+                  >
+                    Read Full Details <ArrowRight size={14} />
+                  </button>
                   </div>
                 </article>
               ))}
@@ -164,9 +159,9 @@ export default function Announcements() {
                   <button
                     type="button"
                     className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-slate-900"
-                    onClick={() => navigate(getAnnouncementPath(item.module))}
+                    onClick={() => setSelectedAnnouncement(item)}
                   >
-                    Read Details <ArrowRight size={14} />
+                    Read Full Details <ArrowRight size={14} />
                   </button>
                   </div>
                 </article>
@@ -182,6 +177,7 @@ export default function Announcements() {
       </main>
       <Footer />
       <Chatbot />
+      <AnnouncementDetailModal item={selectedAnnouncement} onClose={() => setSelectedAnnouncement(null)} />
     </div>
   );
 }

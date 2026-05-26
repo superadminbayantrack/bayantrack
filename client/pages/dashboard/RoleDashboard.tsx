@@ -12,8 +12,22 @@ type Panel = "overview" | "users" | "officials" | "announcements" | "reports" | 
 type FilterPanel = "users" | "announcements" | "reports" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "audit";
 type MonthlyDetailKind = "users" | "services" | "reports" | "messages";
 type RatingRange = "days" | "weeks" | "months" | "years";
+type SnapshotModal = "activities" | "queue" | null;
 const MONTHLY_DETAIL_PAGE_SIZE = 5;
 const DASHBOARD_PAGE_SIZE = 5;
+const DEFAULT_ANNOUNCEMENT_FORM = {
+  title: "",
+  content: "",
+  module: "barangay-updates",
+  category: "Advisory",
+  source: "Barangay Office",
+  image: "",
+  eventDate: "",
+  eventTime: "",
+  location: "",
+  status: "published",
+};
+const ANNOUNCEMENT_STATUS_OPTIONS = ["published", "pending", "ongoing", "resolved", "cancelled"];
 type TableFilterState = { search: string; date: string; time: string };
 type MobileDashboardAction = { label: string; run: () => void; tone?: "default" | "danger" };
 type PermissionFlags = { view: boolean; add: boolean; edit: boolean; archive: boolean; delete: boolean };
@@ -27,7 +41,7 @@ type AdminPermissions = {
 };
 type UserItem = { _id: string; username: string; firstName?: string; middleName?: string; lastName?: string; email: string; contactNumber?: string; address?: string; addressDetails?: { blk?: string; lot?: string; street?: string; subdivision?: string; barangay?: string; city?: string; province?: string; zipCode?: string; }; preferredContactMethod?: string; gender?: string; civilStatus?: string; marriageContractImage?: string; children?: Array<{ _id?: string; fullName?: string; email?: string; birthDate?: string; relationship?: string; status?: "pending" | "approved" | "rejected"; reviewReason?: string }>; role: string; status: "active" | "pending" | "suspended"; statusReason?: string; validIdType?: string; validIdStatus?: string; validIdImage?: string; avatarImage?: string; createdAt?: string; adminPermissions?: Partial<AdminPermissions>; };
 type Official = { _id: string; name: string; role: string; level: "city" | "barangay"; rankOrder: number; committee?: string; description?: string; image?: string; active?: boolean; };
-type AnnouncementItem = { _id: string; title: string; content?: string; category: string; module: string; source?: string; image?: string; archived?: boolean; createdAt?: string; };
+type AnnouncementItem = { _id: string; title: string; content?: string; category: string; module: string; source?: string; image?: string; archived?: boolean; createdAt?: string; eventDate?: string; eventTime?: string; location?: string; status?: string; };
 type HandlerInfo = { adminComment?: string; handledByUser?: string | null; handledByName?: string; handledByRole?: string; handledAt?: string; updatedAt?: string; };
 type HandlerOption = { value: string; label: string; category: "Admins" | "Barangay Officials / Staff"; name: string; role: string; userId: string | null };
 type ReportItem = HandlerInfo & { _id: string; fullName?: string; contactNumber?: string; address?: string; category: string; description: string; status: string; referenceNo: string; attachments?: Array<{ name?: string; type?: string; size?: number; dataUrl?: string }>; createdAt?: string; };
@@ -93,6 +107,7 @@ type ActivityItem = {
   userRole?: string;
   metadata?: { module?: string; action?: string; [key: string]: any };
 };
+type SnapshotQueueItem = { id: string; name: string; status: string; action: string; createdAt?: string; panel: Panel };
 type SystemSettings = { autoArchiveReports: boolean; requireAnnouncementReview: boolean; emailDigest: boolean; allowResidentRegistration: boolean; maintenanceMode: boolean; maintenanceMessage: string; sessionTimeoutMinutes: number; lockoutWindowMinutes: number; developerOptionsEnabled: boolean; notificationRecipientMode: "all" | "superadmin" | "admin"; };
 type SiteContent = {
   navbarBrandText: string;
@@ -485,22 +500,6 @@ function AdminCommentBlock({ value }: { value?: string }) {
   );
 }
 
-function formatUserAddressBreakdown(details?: UserItem["addressDetails"]) {
-  if (!details) return "";
-  const block = String(details.blk || "").trim().replace(/^blk\.?\s*/i, "");
-  const lot = String(details.lot || "").trim().replace(/^lot\.?\s*/i, "");
-  return [
-    block ? `Blk ${block}` : "",
-    lot ? `Lot ${lot}` : "",
-    details.street,
-    details.subdivision,
-    details.barangay || "Mambog II",
-    details.city || "Bacoor",
-    details.province || "Cavite",
-    details.zipCode || "4102",
-  ].map((item) => String(item || "").trim()).filter(Boolean).join(", ");
-}
-
 function ratingBucketLabel(value: string | undefined | null, range: RatingRange) {
   const date = value ? new Date(value) : new Date();
   if (Number.isNaN(date.getTime())) return "Unknown";
@@ -611,6 +610,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [dashboardPages, setDashboardPages] = useState<Record<string, number>>({});
   const [ratingDetailOpen, setRatingDetailOpen] = useState(false);
   const [ratingRange, setRatingRange] = useState<RatingRange>("days");
+  const [snapshotModal, setSnapshotModal] = useState<SnapshotModal>(null);
   const [mobileActionMenu, setMobileActionMenu] = useState<{ title: string; actions: MobileDashboardAction[] } | null>(null);
   const [restoreCategory, setRestoreCategory] = useState("users");
   const [reportSortOrder, setReportSortOrder] = useState<"newest" | "oldest">("newest");
@@ -632,7 +632,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   });
 
   const [newOfficial, setNewOfficial] = useState({ name: "", role: "", level: "barangay", rankOrder: 10, committee: "", description: "", image: "" });
-  const [newAnnouncement, setNewAnnouncement] = useState({ title: "", content: "", module: "barangay-updates", category: "Advisory", source: "Barangay Office", image: "" });
+  const [newAnnouncement, setNewAnnouncement] = useState({ ...DEFAULT_ANNOUNCEMENT_FORM });
   const [newCatalogItem, setNewCatalogItem] = useState({ code: "", title: "", desc: "", usage: "", requirements: "", time: "", active: true, sortOrder: 100 });
   const [newCenter, setNewCenter] = useState({ name: "", address: "", lat: "", lng: "", hazardsCovered: "typhoon,flood,earthquake,fire", capacity: "0", notes: "", active: true });
   const [newHotline, setNewHotline] = useState({ name: "", type: "", number: "", desc: "", when: "", prepare: "", active: true });
@@ -752,6 +752,91 @@ export default function RoleDashboard({ role }: DashboardProps) {
     pendingServices: services.filter((s) => s.status === "pending" || s.status === "in-review").length,
     unreadMessages: messages.filter((m) => m.status === "new").length,
   }), [users, announcements, subscriptions, reports, emergencyAlerts, services, messages]);
+
+  const snapshotQueueItems = useMemo<SnapshotQueueItem[]>(() => {
+    const created = (value?: string) => new Date(value || 0).getTime();
+    return [
+      ...users
+        .filter((user) => user.status === "pending" || user.validIdStatus === "pending")
+        .map((user) => ({
+          id: `user-${user._id}`,
+          name: [user.firstName, user.middleName, user.lastName].filter(Boolean).join(" ") || user.username || user.email,
+          status: user.status === "pending" ? "pending approval" : user.validIdStatus || "pending",
+          action: "Review resident account",
+          createdAt: user.createdAt,
+          panel: "users" as Panel,
+        })),
+      ...reports
+        .filter((report) => ["new", "pending", "in-review"].includes(String(report.status || "").toLowerCase()))
+        .map((report) => ({
+          id: `report-${report._id}`,
+          name: report.fullName || report.referenceNo,
+          status: report.status || "new",
+          action: `Handle report: ${report.category}`,
+          createdAt: report.createdAt,
+          panel: "reports" as Panel,
+        })),
+      ...emergencyAlerts
+        .filter((alert) => !alert.archived && ["active", "acknowledged"].includes(String(alert.status || "").toLowerCase()))
+        .map((alert) => ({
+          id: `alert-${alert._id}`,
+          name: alert.residentSnapshot?.fullName || alert.residentSnapshot?.username || alert.referenceNo,
+          status: alert.status,
+          action: `Live alert: ${alert.situation}`,
+          createdAt: alert.createdAt,
+          panel: "emergencyAlerts" as Panel,
+        })),
+      ...services
+        .filter((service) => ["pending", "in-review"].includes(String(service.status || "").toLowerCase()))
+        .map((service) => ({
+          id: `service-${service._id}`,
+          name: service.fullName || service.referenceNo,
+          status: service.status,
+          action: `Process ${service.serviceType}`,
+          createdAt: service.createdAt,
+          panel: "services" as Panel,
+        })),
+      ...messages
+        .filter((message) => String(message.status || "").toLowerCase() === "new")
+        .map((message) => ({
+          id: `message-${message._id}`,
+          name: message.name || message.referenceNo,
+          status: message.status,
+          action: `Reply to ${message.department}`,
+          createdAt: message.createdAt,
+          panel: "messages" as Panel,
+        })),
+      ...subscriptions
+        .filter((subscription) => subscription.status === "active" && !subscription.handledAt)
+        .map((subscription) => ({
+          id: `subscription-${subscription._id}`,
+          name: subscription.email,
+          status: subscription.status,
+          action: "Review subscriber",
+          createdAt: subscription.createdAt,
+          panel: "subscriptions" as Panel,
+        })),
+    ].sort((a, b) => created(b.createdAt) - created(a.createdAt)).slice(0, 12);
+  }, [users, reports, emergencyAlerts, services, messages, subscriptions]);
+
+  const panelFromActivity = (activity: ActivityItem): Panel => {
+    const key = `${activity.metadata?.module || ""} ${activity.type || ""} ${activity.title || ""}`.toLowerCase();
+    if (key.includes("user") || key.includes("account") || key.includes("child-access")) return "users";
+    if (key.includes("announcement")) return "announcements";
+    if (key.includes("report")) return "reports";
+    if (key.includes("live") || key.includes("emergency")) return "emergencyAlerts";
+    if (key.includes("service")) return "services";
+    if (key.includes("message") || key.includes("contact")) return "messages";
+    if (key.includes("subscriber") || key.includes("subscription")) return "subscriptions";
+    if (key.includes("notification")) return "notifications";
+    return "audit";
+  };
+
+  const openSnapshotPanel = (panel: Panel) => {
+    setActivePanel(panel);
+    setSnapshotModal(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   const chartServices = useMemo(() => {
     const map = new Map<string, number>();
@@ -898,7 +983,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
       announcement.title,
       announcement.content || "No content provided",
       `${announcement.module} | ${announcement.category}`,
-      [announcement.source],
+      [announcement.source, announcement.location, announcement.status, announcement.eventDate, announcement.eventTime],
     ));
     reports.forEach((report) => pushResult(
       report.status === "rejected" ? "restore" : "reports",
@@ -1194,7 +1279,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   };
 
   const filteredAnnouncements = useMemo(
-    () => announcements.filter((a) => !a.archived && (announcementCategory === "all" || a.module === announcementCategory) && matchesDashboardSearch(a.title, a.content, a.category, a.module, a.source) && matchesTableFilters("announcements", a.createdAt, a.title, a.content, a.category, a.module, a.source)),
+    () => announcements.filter((a) => !a.archived && (announcementCategory === "all" || a.module === announcementCategory) && matchesDashboardSearch(a.title, a.content, a.category, a.module, a.source, a.location, a.status) && matchesTableFilters("announcements", a.createdAt, a.title, a.content, a.category, a.module, a.source, a.location, a.status)),
     [announcements, announcementCategory, normalizedSearch, tableFilters],
   );
   const filteredUsers = useMemo(
@@ -2295,14 +2380,14 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 <p className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Daily Snapshot</p>
                 <p className="mt-1 text-[11px] text-slate-500">{activityLogDate === todayInputValue() ? "Today" : activityLogDate}</p>
                 <div className="mt-3 grid grid-cols-2 gap-3">
-                  <div className="rounded-xl bg-white p-3">
+                  <button className="rounded-xl bg-white p-3 text-left transition hover:-translate-y-0.5 hover:border-slate-200 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-300" onClick={() => setSnapshotModal("activities")} type="button">
                     <p className="text-[11px] text-slate-500">Recent Activities</p>
                     <p className="mt-1 text-2xl font-bold text-slate-900">{activities.length}</p>
-                  </div>
-                  <div className="rounded-xl bg-white p-3">
+                  </button>
+                  <button className="rounded-xl bg-white p-3 text-left transition hover:-translate-y-0.5 hover:border-slate-200 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-300" onClick={() => setSnapshotModal("queue")} type="button">
                     <p className="text-[11px] text-slate-500">Unread-like Queue</p>
-                    <p className="mt-1 text-2xl font-bold text-slate-900">{stats.pendingUsers + stats.pendingServices + stats.unreadMessages}</p>
-                  </div>
+                    <p className="mt-1 text-2xl font-bold text-slate-900">{snapshotQueueItems.length}</p>
+                  </button>
                 </div>
               </div>
             </div>
@@ -2623,11 +2708,16 @@ export default function RoleDashboard({ role }: DashboardProps) {
                           <div className="min-w-0">
                             <p className="text-[15px] font-semibold leading-5 text-slate-900">{a.title}</p>
                             <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-slate-500">{a.content || "No content provided."}</p>
+                            {(a.eventDate || a.eventTime || a.location) && (
+                              <p className="mt-2 text-[11px] font-semibold text-slate-500">
+                                {[a.eventDate, a.eventTime, a.location].filter(Boolean).join(" | ")}
+                              </p>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-[13px] leading-5 text-slate-700 break-words">{a.module}</td>
                         <td className="px-4 py-3 text-[13px] leading-5 text-slate-700 break-words">{a.category}</td>
-                        <td className="px-4 py-3 align-middle"><div className="w-fit"><Badge value={a.archived ? "archived" : "active"} /></div></td>
+                        <td className="px-4 py-3 align-middle"><div className="w-fit"><Badge value={a.archived ? "archived" : a.status || "published"} /></div></td>
                         <td className="px-4 py-3">
                           {renderActionControls(`Announcement ${a.title}`, (
                           <>
@@ -3601,9 +3691,6 @@ export default function RoleDashboard({ role }: DashboardProps) {
                     <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Address</p>
                     <div className="space-y-1 text-slate-700">
                       <p><span className="font-semibold">Full Address:</span> {selectedUser.address || "N/A"}</p>
-                      {selectedUser.addressDetails && (
-                        <p><span className="font-semibold">Breakdown:</span> {formatUserAddressBreakdown(selectedUser.addressDetails) || "N/A"}</p>
-                      )}
                     </div>
                   </div>
                   <div className={`${sectionCard} md:col-span-2`}>
@@ -3899,6 +3986,20 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Module" className="lg:col-span-2">
                 <select className={inputBase} value={newAnnouncement.module} onChange={(e) => setNewAnnouncement((p) => ({ ...p, module: e.target.value }))}><option value="barangay-updates">Barangay Updates</option><option value="emergency-hotlines">Emergency Hotlines</option><option value="phivolcs-alerts">PHIVOLCS Alerts</option><option value="fact-check">Fact Check</option><option value="all-news-updates">All News & Updates</option></select>
               </LabeledField>
+              <LabeledField label="Event Date">
+                <input className={inputBase} type="date" value={newAnnouncement.eventDate} onChange={(e) => setNewAnnouncement((p) => ({ ...p, eventDate: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Event Time">
+                <input className={inputBase} type="time" value={newAnnouncement.eventTime} onChange={(e) => setNewAnnouncement((p) => ({ ...p, eventTime: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Location">
+                <input className={inputBase} placeholder="Example: Mambog II Covered Court" value={newAnnouncement.location} onChange={(e) => setNewAnnouncement((p) => ({ ...p, location: e.target.value }))} />
+              </LabeledField>
+              <LabeledField label="Status">
+                <select className={inputBase} value={newAnnouncement.status} onChange={(e) => setNewAnnouncement((p) => ({ ...p, status: e.target.value }))}>
+                  {ANNOUNCEMENT_STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </LabeledField>
               <LabeledField label="Content" className="lg:col-span-2">
                 <textarea className={inputBase} rows={3} placeholder="Content" value={newAnnouncement.content} onChange={(e) => setNewAnnouncement((p) => ({ ...p, content: e.target.value }))} />
               </LabeledField>
@@ -3914,7 +4015,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               </LabeledField>
               {newAnnouncement.image && <img src={newAnnouncement.image} alt="Announcement preview" className="h-20 w-28 rounded border object-cover lg:col-span-2" />}
             </div>
-            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Create Announcement", message: "Publish this announcement?", confirmLabel: "Publish", run: () => runActionWithFeedback("Announcement created", () => api.post("/api/announcements", newAnnouncement, { headers: authHeaders() }).then(() => { setAddAnnouncementOpen(false); setNewAnnouncement({ title: "", content: "", module: "barangay-updates", category: "Advisory", source: "Barangay Office", image: "" }); })) })} type="button">Publish Announcement</button>
+            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Create Announcement", message: "Publish this announcement?", confirmLabel: "Publish", run: () => runActionWithFeedback("Announcement created", () => api.post("/api/announcements", newAnnouncement, { headers: authHeaders() }).then(() => { setAddAnnouncementOpen(false); setNewAnnouncement({ ...DEFAULT_ANNOUNCEMENT_FORM }); })) })} type="button">Publish Announcement</button>
           </div>
         </div>
       )}
@@ -4491,6 +4592,20 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Module" className="lg:col-span-2">
                 <select className={inputBase} value={announcementEditModal.module} onChange={(e) => setAnnouncementEditModal((p) => p ? { ...p, module: e.target.value } : p)}><option value="barangay-updates">Barangay Updates</option><option value="emergency-hotlines">Emergency Hotlines</option><option value="phivolcs-alerts">PHIVOLCS Alerts</option><option value="fact-check">Fact Check</option><option value="all-news-updates">All News & Updates</option></select>
               </LabeledField>
+              <LabeledField label="Event Date">
+                <input className={inputBase} type="date" value={announcementEditModal.eventDate || ""} onChange={(e) => setAnnouncementEditModal((p) => p ? { ...p, eventDate: e.target.value } : p)} />
+              </LabeledField>
+              <LabeledField label="Event Time">
+                <input className={inputBase} type="time" value={announcementEditModal.eventTime || ""} onChange={(e) => setAnnouncementEditModal((p) => p ? { ...p, eventTime: e.target.value } : p)} />
+              </LabeledField>
+              <LabeledField label="Location">
+                <input className={inputBase} placeholder="Example: Mambog II Covered Court" value={announcementEditModal.location || ""} onChange={(e) => setAnnouncementEditModal((p) => p ? { ...p, location: e.target.value } : p)} />
+              </LabeledField>
+              <LabeledField label="Status">
+                <select className={inputBase} value={announcementEditModal.status || "published"} onChange={(e) => setAnnouncementEditModal((p) => p ? { ...p, status: e.target.value } : p)}>
+                  {ANNOUNCEMENT_STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </LabeledField>
               <LabeledField label="Content" className="lg:col-span-2">
                 <textarea className={inputBase} rows={3} value={announcementEditModal.content || ""} onChange={(e) => setAnnouncementEditModal((p) => p ? { ...p, content: e.target.value } : p)} />
               </LabeledField>
@@ -4972,6 +5087,71 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   {action.label}
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {snapshotModal && (
+        <div className={modalOverlay}>
+          <div className={`${modalCard} max-w-3xl`}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Daily Snapshot</p>
+                <h3 className="text-xl font-bold text-slate-900">{snapshotModal === "activities" ? "Recent Activities" : "Unread-like Queue"}</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  {snapshotModal === "activities"
+                    ? "Latest system actions for the selected activity date."
+                    : "Pending items that need admin attention."}
+                </p>
+              </div>
+              <button className={iconBtn} onClick={() => setSnapshotModal(null)} type="button" title="Close snapshot" aria-label="Close snapshot"><X size={18} /></button>
+            </div>
+            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Name</th>
+                    <th className="px-4 py-3 font-semibold">Status</th>
+                    <th className="px-4 py-3 font-semibold">What happened</th>
+                    <th className="px-4 py-3 font-semibold">Date / Time</th>
+                    <th className="px-4 py-3 font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapshotModal === "activities" ? (
+                    activities.slice(0, 8).map((activity) => (
+                      <tr key={activity._id} className="border-t border-slate-200 align-top">
+                        <td className="px-4 py-3 font-semibold text-slate-900">{activity.userFullName || activity.userName || "System"}</td>
+                        <td className="px-4 py-3"><Badge value={activity.userRole || activity.type || "activity"} /></td>
+                        <td className="px-4 py-3 text-slate-600">{activity.title}</td>
+                        <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(activity.createdAt)}</td>
+                        <td className="px-4 py-3">
+                          <button className={iconBtn} onClick={() => openSnapshotPanel(panelFromActivity(activity))} type="button" title="View related records" aria-label="View related records">
+                            <MoreHorizontal size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    snapshotQueueItems.map((item) => (
+                      <tr key={item.id} className="border-t border-slate-200 align-top">
+                        <td className="px-4 py-3 font-semibold text-slate-900">{item.name}</td>
+                        <td className="px-4 py-3"><Badge value={item.status} /></td>
+                        <td className="px-4 py-3 text-slate-600">{item.action}</td>
+                        <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(item.createdAt)}</td>
+                        <td className="px-4 py-3">
+                          <button className={iconBtn} onClick={() => openSnapshotPanel(item.panel)} type="button" title="Handle this item" aria-label="Handle this item">
+                            <MoreHorizontal size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+              {snapshotModal === "activities" && activities.length === 0 && <p className="p-5 text-sm text-slate-500">No recent activities for this date.</p>}
+              {snapshotModal === "queue" && snapshotQueueItems.length === 0 && <p className="p-5 text-sm text-slate-500">No pending queue items right now.</p>}
             </div>
           </div>
         </div>

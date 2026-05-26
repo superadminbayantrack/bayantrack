@@ -8,6 +8,7 @@ import { clearAuthSession } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import { Reveal } from "@/components/Reveal";
 import { FeedbackModal } from "@/components/FeedbackModal";
+import { MAMBOG_II_SUBDIVISIONS } from "@/lib/mambogSubdivisions";
 
 type Activity = {
   _id: string;
@@ -68,6 +69,15 @@ const cleanAddressValue = (value: string) => value.replace(/\s+/g, " ").trim();
 const stripAddressPrefix = (value: string, prefix: "blk" | "lot") => (
   cleanAddressValue(value).replace(new RegExp(`^${prefix}\\.?\\s*`, "i"), "")
 );
+const getAgeFromBirthDate = (birthDate: string) => {
+  const birth = new Date(birthDate);
+  if (Number.isNaN(birth.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) age -= 1;
+  return age;
+};
 const composeResidentAddress = (details: AddressDetails) => {
   const block = stripAddressPrefix(details.blk, "blk");
   const lot = stripAddressPrefix(details.lot, "lot");
@@ -210,6 +220,14 @@ export default function ProfileSettings() {
       setFormData((prev) => ({ ...prev, contactNumber: digitOnly(value) }));
       return;
     }
+    if (name === "civilStatus") {
+      setFormData((prev) => ({
+        ...prev,
+        civilStatus: value,
+        marriageContractImage: value === "married" ? prev.marriageContractImage : "",
+      }));
+      return;
+    }
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
@@ -222,8 +240,9 @@ export default function ProfileSettings() {
   };
 
   const handleChildChange = (index: number, field: keyof ChildLink, value: string) => {
+    const nextValue = field === "email" ? value.trim().toLowerCase() : value;
     setChildren((prev) => prev.map((child, childIndex) => (
-      childIndex === index ? { ...child, [field]: value } : child
+      childIndex === index ? { ...child, [field]: nextValue } : child
     )));
   };
 
@@ -240,6 +259,15 @@ export default function ProfileSettings() {
     const child = children[index];
     if (!child?.fullName || !child?.email || !child?.birthDate) {
       setFeedback({ isOpen: true, title: "Incomplete Child Info", message: "Enter the child's full name, email, and birth date before sending OTP.", type: "error" });
+      return;
+    }
+    if (!emailPattern.test(child.email.trim().toLowerCase())) {
+      setFeedback({ isOpen: true, title: "Invalid Child Email", message: "Enter a valid email for the linked child before sending OTP.", type: "error" });
+      return;
+    }
+    const age = getAgeFromBirthDate(child.birthDate);
+    if (age === null || age < 18) {
+      setFeedback({ isOpen: true, title: "Child Access Requirement", message: "Linked child access records must be for children who are 18 years old or above.", type: "error" });
       return;
     }
 
@@ -298,6 +326,10 @@ export default function ProfileSettings() {
     }
     if (!addressDetails.street.trim() || !addressDetails.subdivision.trim()) {
       setFeedback({ isOpen: true, title: "Address Required", message: "Please complete your Mambog II street and subdivision/compound/purok.", type: "error" });
+      return;
+    }
+    if (formData.civilStatus === "married" && !formData.marriageContractImage) {
+      setFeedback({ isOpen: true, title: "Marriage Contract Required", message: "Please upload your marriage contract when civil status is set to married.", type: "error" });
       return;
     }
     if (formData.newPassword && formData.newPassword !== formData.confirmNewPassword) {
@@ -482,9 +514,14 @@ export default function ProfileSettings() {
       setFeedback({ isOpen: true, title: "Incomplete Details", message: "Child name and email are required.", type: "error" });
       return;
     }
+    const normalizedChildEmail = childSessionForm.email.trim().toLowerCase();
+    if (!emailPattern.test(normalizedChildEmail)) {
+      setFeedback({ isOpen: true, title: "Invalid Child Email", message: "Enter a valid child email address before requesting OTP.", type: "error" });
+      return;
+    }
     setChildSessionOtpModal({ isOpen: true, otp: "", sending: true, verifying: false });
     try {
-      await api.post("/api/auth/child-session/request-otp", childSessionForm, { headers: authHeaders() });
+      await api.post("/api/auth/child-session/request-otp", { ...childSessionForm, email: normalizedChildEmail }, { headers: authHeaders() });
       setChildSessionOtpModal((prev) => ({ ...prev, sending: false }));
       setFeedback({ isOpen: true, title: "OTP Sent", message: "A verification OTP was sent to the parent email before updating the child profile.", type: "success" });
     } catch (err: any) {
@@ -500,7 +537,7 @@ export default function ProfileSettings() {
     }
     setChildSessionOtpModal((prev) => ({ ...prev, verifying: true }));
     try {
-      const res = await api.put("/api/auth/child-session/update", { ...childSessionForm, otp: childSessionOtpModal.otp }, { headers: authHeaders() });
+      const res = await api.put("/api/auth/child-session/update", { ...childSessionForm, email: childSessionForm.email.trim().toLowerCase(), otp: childSessionOtpModal.otp }, { headers: authHeaders() });
       setActingChild(res.data?.actingChild || actingChild);
       setChildren(Array.isArray(res.data?.children) ? res.data.children : children);
       setChildSessionOtpModal({ isOpen: false, otp: "", sending: false, verifying: false });
@@ -569,7 +606,7 @@ export default function ProfileSettings() {
                             type="email"
                             className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700"
                             value={childSessionForm.email}
-                            onChange={(e) => setChildSessionForm((prev) => ({ ...prev, email: e.target.value }))}
+                            onChange={(e) => setChildSessionForm((prev) => ({ ...prev, email: e.target.value.trim().toLowerCase() }))}
                           />
                         </div>
                       </div>
@@ -676,13 +713,20 @@ export default function ProfileSettings() {
 
                   {formData.civilStatus === "married" && (
                     <div className="space-y-2">
-                      <label className="block text-xs font-bold text-gray-800">Marriage Contract (Optional)</label>
+                      <label className="block text-xs font-bold text-gray-800">Marriage Contract</label>
                       <label className="flex w-full cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-white px-4 py-6 text-center transition hover:bg-slate-50 md:max-w-md">
                         <input type="file" accept="image/*" onChange={handleMarriageContractUpload} className="hidden" />
                         <span className="text-sm font-semibold text-slate-700">{formData.marriageContractImage ? "Marriage contract uploaded" : "Upload marriage contract"}</span>
-                        <span className="mt-1 text-xs text-slate-500">Optional supporting document for profile review.</span>
+                        <span className="mt-1 text-xs text-slate-500">Required when civil status is married.</span>
                       </label>
-                      {formData.marriageContractImage && <img src={formData.marriageContractImage} alt="Marriage contract" className="h-24 w-full rounded-lg border border-slate-200 object-cover md:w-72" />}
+                      {formData.marriageContractImage && (
+                        <div className="flex flex-col gap-2 md:max-w-md">
+                          <img src={formData.marriageContractImage} alt="Marriage contract" className="h-24 w-full rounded-lg border border-slate-200 object-cover md:w-72" />
+                          <button type="button" onClick={() => setFormData((prev) => ({ ...prev, marriageContractImage: "" }))} className="w-fit rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100">
+                            Remove uploaded contract
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </section>
@@ -704,7 +748,11 @@ export default function ProfileSettings() {
                     </div>
                     <div className="space-y-1.5">
                       <label className="block text-xs font-bold text-gray-800">Subdivision / Compound / Purok</label>
-                      <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" name="subdivision" placeholder="Example: Green Plain, Villa Isabel" value={addressDetails.subdivision} onChange={handleAddressChange} />
+                      <input list="profile-mambog-subdivision-options" className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" name="subdivision" placeholder="Select or type your Mambog II subdivision" value={addressDetails.subdivision} onChange={handleAddressChange} />
+                      <datalist id="profile-mambog-subdivision-options">
+                        {MAMBOG_II_SUBDIVISIONS.map((name) => <option key={name} value={name} />)}
+                      </datalist>
+                      <p className="text-[11px] text-slate-500">You can type manually if your exact Mambog II area is not listed.</p>
                     </div>
                   </div>
 

@@ -5,6 +5,7 @@ import { Eye, EyeOff, User, Lock, ArrowRight, ArrowLeft, Mail, Phone, Upload, X,
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { clearAuthSession, getRoleHome, normalizeRole, setAuthSession } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { MAMBOG_II_SUBDIVISIONS } from "@/lib/mambogSubdivisions";
 import brandLogo from "../../../assets/brandlogo/brand_logo.png";
 
 type ViewState = "login" | "forgot" | "create" | "reset";
@@ -721,7 +722,11 @@ const Login = () => {
                   </div>
                   <div className="flex flex-col gap-1 sm:col-span-2">
                     <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Subdivision / Compound / Purok</label>
-                    <input type="text" placeholder="Example: Green Plain, Villa Isabel, Purok 1" name="subdivision" value={registerData.subdivision} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs outline-none focus:border-blue-500 focus:bg-white" />
+                    <input list="mambog-subdivision-options" type="text" placeholder="Select or type your Mambog II subdivision/compound" name="subdivision" value={registerData.subdivision} onChange={handleRegisterChange} className="w-full rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs outline-none focus:border-blue-500 focus:bg-white" />
+                    <datalist id="mambog-subdivision-options">
+                      {MAMBOG_II_SUBDIVISIONS.map((name) => <option key={name} value={name} />)}
+                    </datalist>
+                    <p className="px-1 text-[10px] text-slate-500">Choose from the list or type the exact Mambog II compound if it is not listed.</p>
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Barangay</label>

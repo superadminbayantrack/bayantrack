@@ -8,8 +8,9 @@ import { api, authHeaders } from '@/lib/api';
 import { hasAuthSession } from '@/lib/auth';
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { EmergencySafetyRouteCard } from "@/components/EmergencySafetyRouteCard";
+import { AnnouncementDetailModal, type AnnouncementDetailItem } from "@/components/AnnouncementDetailModal";
 
-type Announcement = {
+type Announcement = AnnouncementDetailItem & {
   _id: string;
   title: string;
   category: string;
@@ -32,6 +33,7 @@ export default function FactCheck() {
   const [filter, setFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [items, setItems] = useState<Announcement[]>([]);
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
   const [referenceNumber, setReferenceNumber] = useState('');
@@ -228,7 +230,7 @@ export default function FactCheck() {
                   <p className="text-[#3b4b72] text-[14.5px] font-medium leading-relaxed italic">"{item.content}"</p>
                 </div>
                 <div className="text-[14px] text-gray-700 leading-relaxed flex-1 mb-6"><span className="font-bold text-[#212b46]">Source: </span>{item.source}</div>
-                <div className="mt-auto pt-4 border-t border-gray-50 flex justify-center"><button className="text-[#638ECB] font-semibold text-sm flex items-center gap-1.5 hover:text-[#3b4b72] transition-colors">Read Full Details <ArrowRight size={14} /></button></div>
+                <div className="mt-auto pt-4 border-t border-gray-50 flex justify-center"><button type="button" onClick={() => setSelectedAnnouncement(item)} className="text-[#638ECB] font-semibold text-sm flex items-center gap-1.5 hover:text-[#3b4b72] transition-colors">Read Full Details <ArrowRight size={14} /></button></div>
               </div>
             </Reveal>
           ))}
@@ -238,6 +240,7 @@ export default function FactCheck() {
       </main>
 
       <Footer />
+      <AnnouncementDetailModal item={selectedAnnouncement} onClose={() => setSelectedAnnouncement(null)} />
 
       {isReportModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1e293b]/80 backdrop-blur-sm animate-fade-in">

@@ -6,8 +6,9 @@ import { Footer } from "@/components/Footer";
 import { Reveal } from "@/components/Reveal";
 import { api } from '@/lib/api';
 import { EmergencySafetyRouteCard } from "@/components/EmergencySafetyRouteCard";
+import { AnnouncementDetailModal, type AnnouncementDetailItem } from "@/components/AnnouncementDetailModal";
 
-type Announcement = {
+type Announcement = AnnouncementDetailItem & {
   _id: string;
   title: string;
   category: string;
@@ -21,6 +22,7 @@ export default function BarangayUpdate() {
   const [filter, setFilter] = useState('All');
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<Announcement[]>([]);
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
 
   const ITEMS_PER_PAGE = 6;
   const categories = ['All', 'Advisory', 'Event', 'Alert', 'Health', 'Fact Check'];
@@ -95,7 +97,9 @@ export default function BarangayUpdate() {
                     </div>
                     <h3 className="font-bold text-gray-900 text-lg mt-1 mb-3 line-clamp-2 leading-tight">{item.title}</h3>
                     <p className="text-[14px] text-gray-600 line-clamp-3 mb-6 leading-relaxed flex-1">{item.content}</p>
-                    <span className="text-[#395886] text-[13px] font-bold flex items-center gap-1.5 hover:underline w-fit">Read Details <ArrowRight size={14} /></span>
+                    <button type="button" onClick={() => setSelectedAnnouncement(item)} className="text-[#395886] text-[13px] font-bold flex items-center gap-1.5 hover:underline w-fit">
+                      Read Full Details <ArrowRight size={14} />
+                    </button>
                   </div>
                 </div>
               </Reveal>
@@ -112,6 +116,7 @@ export default function BarangayUpdate() {
 
       <Footer />
       <Chatbot />
+      <AnnouncementDetailModal item={selectedAnnouncement} onClose={() => setSelectedAnnouncement(null)} />
     </div>
   );
 }

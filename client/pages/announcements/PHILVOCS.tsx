@@ -1,13 +1,14 @@
 ﻿import { useEffect, useState } from 'react';
-import { Activity, AlertTriangle } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowRight } from 'lucide-react';
 import { Chatbot } from "@/components/Chatbot";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { Reveal } from "@/components/Reveal";
 import { api } from '@/lib/api';
 import { EmergencySafetyRouteCard } from "@/components/EmergencySafetyRouteCard";
+import { AnnouncementDetailModal, type AnnouncementDetailItem } from "@/components/AnnouncementDetailModal";
 
-type Announcement = {
+type Announcement = AnnouncementDetailItem & {
   _id: string;
   title: string;
   category: string;
@@ -21,6 +22,7 @@ const FadeIn = ({ children }: any) => <div className="animate-fade-in h-full">{c
 
 export default function PHIVOLCS() {
   const [items, setItems] = useState<Announcement[]>([]);
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -75,6 +77,9 @@ export default function PHIVOLCS() {
                     <p className="text-xs font-bold text-red-800 flex items-center gap-2 mb-1.5 uppercase tracking-wide"><AlertTriangle size={14} strokeWidth={2.5} /> Official Source</p>
                     <p className="text-[13px] text-red-700 leading-snug font-medium">{item.source}</p>
                   </div>
+                  <button type="button" onClick={() => setSelectedAnnouncement(item)} className="mt-4 inline-flex w-fit items-center gap-1.5 text-sm font-bold text-red-700 hover:text-red-900">
+                    Read Full Details <ArrowRight size={14} />
+                  </button>
                   </div>
                 </div>
               </Reveal>
@@ -86,6 +91,7 @@ export default function PHIVOLCS() {
 
       <Footer />
       <Chatbot />
+      <AnnouncementDetailModal item={selectedAnnouncement} onClose={() => setSelectedAnnouncement(null)} />
     </div>
   );
 }

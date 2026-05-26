@@ -18,20 +18,6 @@ const AUTH_TOKEN_TTL = process.env.AUTH_TOKEN_TTL || '7d';
 const ALLOWED_BARANGAY_KEYWORDS = ['mambog ii', 'mambog 2'];
 const ALLOWED_CITY_KEYWORDS = ['bacoor'];
 const ALLOWED_PROVINCE_KEYWORDS = ['cavite'];
-const ALLOWED_SUBDIVISIONS = [
-  'villa isabel',
-  'camella',
-  'soldiers hills',
-  'green plain',
-  'greenplain',
-  'green valley',
-  'molino',
-  'mambog',
-  'springville',
-  'st. dominic',
-  'niog',
-  'talaba',
-];
 const OTP_EMAIL_UNAVAILABLE_MESSAGE = 'OTP email service is currently unavailable. Check the Vercel email environment variables.';
 
 function residentNotificationActorKey(userPayload = {}) {
@@ -161,7 +147,7 @@ function ensureResidentAddress({ address, addressDetails }) {
   const hasBarangay = ALLOWED_BARANGAY_KEYWORDS.some((k) => source.includes(k));
   const hasCity = ALLOWED_CITY_KEYWORDS.some((k) => source.includes(k));
   const hasProvince = ALLOWED_PROVINCE_KEYWORDS.some((k) => source.includes(k));
-  const hasKnownSubdivision = ALLOWED_SUBDIVISIONS.some((k) => source.includes(k));
+  const subdivision = String(addressDetails?.subdivision || '').trim();
 
   if (!hasBarangay || !hasCity || !hasProvince) {
     return {
@@ -170,10 +156,10 @@ function ensureResidentAddress({ address, addressDetails }) {
     };
   }
 
-  if (!hasKnownSubdivision) {
+  if (!subdivision) {
     return {
       ok: false,
-      msg: 'Please enter a valid Mambog II road/subdivision/compound in your address.',
+      msg: 'Please enter your Mambog II subdivision, compound, purok, or landmark.',
     };
   }
 
