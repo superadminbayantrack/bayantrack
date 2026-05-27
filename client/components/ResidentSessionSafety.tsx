@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { clearAuthSession, getRole, hasAuthSession } from "@/lib/auth";
+import { clearAuthSession, getRole, hasAuthSession, hasChildSession } from "@/lib/auth";
 
 const RESIDENT_FOCUS_TIMEOUT_MS = 3 * 60 * 1000;
 
@@ -14,7 +14,8 @@ export function ResidentSessionSafety() {
   useEffect(() => {
     const isLoginRoute = location.pathname === "/" || location.pathname === "/login";
     const isResidentSession = !isLoginRoute && hasAuthSession() && getRole() === "resident";
-    if (!isResidentSession) return;
+    const isChildSession = hasChildSession();
+    if (!isResidentSession || isChildSession) return;
 
     const clearTimer = () => {
       if (timeoutRef.current) {

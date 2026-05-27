@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, User, Lock, ArrowRight, ArrowLeft, Mail, Phone, Upload, X, CloudSun, Megaphone, Activity, CheckCircle } from "lucide-react";
 import { FeedbackModal } from "@/components/FeedbackModal";
@@ -18,6 +18,7 @@ const cleanAddressValue = (value: string) => value.replace(/\s+/g, " ").trim();
 const stripAddressPrefix = (value: string, prefix: "blk" | "lot") => (
   cleanAddressValue(value).replace(new RegExp(`^${prefix}\\.?\\s*`, "i"), "")
 );
+const appendDevOtp = (message: string, _debugOtp?: string) => message;
 const formatResidentAddress = (details: {
   blk?: string;
   lot?: string;
@@ -45,6 +46,7 @@ const formatResidentAddress = (details: {
 const Login = () => {
   const OTP_REQUEST_TIMEOUT = 20000;
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [view, setView] = useState<ViewState>("login");
   const [showPassword, setShowPassword] = useState(false);
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
@@ -115,6 +117,17 @@ const Login = () => {
   useEffect(() => {
     clearAuthSession();
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get("reason") !== "session-timeout") return;
+    setFeedback({
+      isOpen: true,
+      title: "Session Expired",
+      message: "Sorry, BayanTrack automatically logged you out because the portal was left inactive or out of focus. Please log in again to continue.",
+      type: "error",
+    });
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     const loadUpdates = async () => {
@@ -237,7 +250,15 @@ const Login = () => {
         });
         const role = normalizeRole(res.data.role) || "resident";
 
-        setAuthSession(undefined, role);
+        setAuthSession(undefined, role, {
+          actingChild: res.data?.actingChild
+            ? {
+                id: res.data.actingChild.id,
+                fullName: res.data.actingChild.fullName,
+                email: res.data.actingChild.email,
+              }
+            : null,
+        });
         setLoginProgress(100);
         navigate(getRoleHome(role));
       } catch (err: any) {
@@ -302,9 +323,9 @@ const Login = () => {
           address,
           addressDetails,
         });
-        await api.post("/api/auth/send-otp", { email: registerData.email }, { timeout: OTP_REQUEST_TIMEOUT });
+        const res = await api.post("/api/auth/send-otp", { email: registerData.email }, { timeout: OTP_REQUEST_TIMEOUT });
         setShowOtpModal(true);
-        setFeedback({ isOpen: true, title: "OTP Sent", message: "Please check your email for the verification code.", type: "success" });
+        setFeedback({ isOpen: true, title: "OTP Sent", message: appendDevOtp("Please check your email for the verification code.", res.data?.debugOtp), type: "success" });
       } catch (err: any) {
         setFeedback({ isOpen: true, title: "Error", message: err.response?.data?.msg || "Failed to send OTP.", type: "error" });
       } finally {
@@ -318,8 +339,8 @@ const Login = () => {
       }
       try {
         beginOtpLoading("Sending password reset OTP");
-        await api.post("/api/auth/forgot-password", { email: resetData.email }, { timeout: OTP_REQUEST_TIMEOUT });
-        setFeedback({ isOpen: true, title: "OTP Sent", message: "Please check your email for the verification code.", type: "success" });
+        const res = await api.post("/api/auth/forgot-password", { email: resetData.email }, { timeout: OTP_REQUEST_TIMEOUT });
+        setFeedback({ isOpen: true, title: "OTP Sent", message: appendDevOtp("Please check your email for the verification code.", res.data?.debugOtp), type: "success" });
         setView("reset");
       } catch (err: any) {
         setFeedback({ isOpen: true, title: "Error", message: err.response?.data?.msg || "Failed to send OTP.", type: "error" });
@@ -394,8 +415,8 @@ const Login = () => {
     try {
       setSendingRegisterOtp(true);
       beginOtpLoading("Resending registration OTP");
-      await api.post("/api/auth/send-otp", { email: registerData.email }, { timeout: OTP_REQUEST_TIMEOUT });
-      setFeedback({ isOpen: true, title: "OTP Resent", message: "A new OTP has been sent to your email.", type: "success" });
+      const res = await api.post("/api/auth/send-otp", { email: registerData.email }, { timeout: OTP_REQUEST_TIMEOUT });
+      setFeedback({ isOpen: true, title: "OTP Resent", message: appendDevOtp("A new OTP has been sent to your email.", res.data?.debugOtp), type: "success" });
     } catch (err: any) {
       setFeedback({ isOpen: true, title: "Resend Failed", message: err.response?.data?.msg || "Failed to resend OTP.", type: "error" });
     } finally {

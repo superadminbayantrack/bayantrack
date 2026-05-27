@@ -8,7 +8,7 @@ import NotificationState from '../models/NotificationState.js';
 import SystemSetting from '../models/SystemSetting.js';
 import ServiceRequest from '../models/ServiceRequest.js';
 import { auth } from '../middleware/auth.js';
-import { AUTH_COOKIE_NAME, getAuthCookieOptions, getJwtSecret } from '../config/env.js';
+import { AUTH_COOKIE_NAME, getAuthCookieOptions, getJwtSecret, isProductionEnv } from '../config/env.js';
 import { getAdminNotificationRecipients, logSystemEvent, sendUserMail } from '../utils/notifications.js';
 import { findEmbeddedAccount, getEmbeddedAccountById, isReservedEmbeddedIdentity } from '../config/embeddedAccounts.js';
 import { isValidEmail, isValidPhilippineMobile } from '../utils/validation.js';
@@ -19,6 +19,20 @@ const ALLOWED_BARANGAY_KEYWORDS = ['mambog ii', 'mambog 2'];
 const ALLOWED_CITY_KEYWORDS = ['bacoor'];
 const ALLOWED_PROVINCE_KEYWORDS = ['cavite'];
 const OTP_EMAIL_UNAVAILABLE_MESSAGE = 'OTP email service is currently unavailable. Check the Vercel email environment variables.';
+
+async function sendOtpMailWithFallback({ to, subject, html, text, otp, context }) {
+  const sent = await sendUserMail({ to, subject, html, text });
+  if (sent) {
+    return { sent: true, debugOtp: '' };
+  }
+
+  if (!isProductionEnv()) {
+    console.warn(`[DEV OTP] ${context} -> ${to}: ${otp}`);
+    return { sent: true, debugOtp: otp };
+  }
+
+  return { sent: false, debugOtp: '' };
+}
 
 function residentNotificationActorKey(userPayload = {}) {
   return `resident:${String(userPayload?.id || userPayload?._id || 'unknown').trim() || 'unknown'}`;
@@ -38,6 +52,31 @@ function normalizeText(value) {
 
 function normalizeLoginIdentifier(value) {
   return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function normalizePhilippineMobile(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (/^09\d{9}$/.test(digits)) return digits;
+  if (/^639\d{9}$/.test(digits)) return `0${digits.slice(2)}`;
+  if (/^9\d{9}$/.test(digits)) return `0${digits}`;
+  return digits;
+}
+
+function normalizeOptionalImageDataUrl(value, label = 'Image') {
+  if (value === undefined || value === null) return '';
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(text)) {
+    const error = new Error(`${label} must be a PNG, JPG, WEBP, or GIF image.`);
+    error.statusCode = 400;
+    throw error;
+  }
+  if (text.length > 3_000_000) {
+    const error = new Error(`${label} must be 2MB or below.`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return text;
 }
 
 function composeAddress(addressDetails) {
@@ -98,6 +137,7 @@ function normalizeChildren(children) {
       email: String(child?.email || '').trim().toLowerCase(),
       birthDate: String(child?.birthDate || '').trim(),
       relationship: String(child?.relationship || 'Child').trim() || 'Child',
+      avatarImage: String(child?.avatarImage || '').trim(),
       status: ['pending', 'approved', 'rejected'].includes(String(child?.status || '').trim()) ? String(child?.status).trim() : 'pending',
       reviewReason: String(child?.reviewReason || '').trim(),
       reviewedAt: child?.reviewedAt || null,
@@ -382,11 +422,13 @@ router.post('/send-otp', async (req, res) => {
       otp,
       label: 'Registration OTP',
     };
-    const sent = await sendUserMail({
+    const { sent, debugOtp } = await sendOtpMailWithFallback({
       to: normalizedEmail,
       subject: 'Your BayanTrack Registration OTP',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
+      otp,
+      context: 'registration-otp',
     });
 
     if (!sent) {
@@ -395,7 +437,7 @@ router.post('/send-otp', async (req, res) => {
         msg: OTP_EMAIL_UNAVAILABLE_MESSAGE,
       });
     }
-    res.json({ msg: 'OTP sent to email' });
+    res.json({ msg: 'OTP sent to email', debugOtp });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server error sending email');
@@ -415,17 +457,19 @@ router.post('/register/check', async (req, res) => {
     if (!settings.allowResidentRegistration) {
       return res.status(403).json({ msg: 'Resident registration is temporarily disabled by system settings.' });
     }
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const normalizedContactNumber = normalizePhilippineMobile(contactNumber);
 
     if (!username || !email || !contactNumber) {
       return res.status(400).json({ msg: 'Username, email, and phone number are required.' });
     }
-    if (!isValidEmail(email)) {
+    if (!isValidEmail(normalizedEmail)) {
       return res.status(400).json({ msg: 'Valid email address is required.' });
     }
-    if (!isValidPhilippineMobile(contactNumber)) {
+    if (!isValidPhilippineMobile(normalizedContactNumber)) {
       return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
     }
-    if (isReservedEmbeddedIdentity({ username, email, contactNumber })) {
+    if (isReservedEmbeddedIdentity({ username, email: normalizedEmail, contactNumber: normalizedContactNumber })) {
       return res.status(400).json({ msg: 'These login details are reserved for barangay staff. Please use different resident details.' });
     }
 
@@ -435,11 +479,11 @@ router.post('/register/check', async (req, res) => {
       return res.status(400).json({ msg: residentCheck.msg });
     }
 
-    const user = await User.findOne({ $or: [{ email }, { username }, { contactNumber }] });
+    const user = await User.findOne({ $or: [{ email: normalizedEmail }, { username }, { contactNumber: normalizedContactNumber }] });
     if (user) {
-      if (user.email === email) return res.status(400).json({ msg: 'Email is already registered.' });
+      if (user.email === normalizedEmail) return res.status(400).json({ msg: 'Email is already registered.' });
       if (user.username === username) return res.status(400).json({ msg: 'Username is already taken.' });
-      if (user.contactNumber === contactNumber) return res.status(400).json({ msg: 'Phone number is already registered.' });
+      if (user.contactNumber === normalizedContactNumber) return res.status(400).json({ msg: 'Phone number is already registered.' });
       return res.status(400).json({ msg: 'Account details already in use.' });
     }
 
@@ -483,11 +527,12 @@ router.post('/register', async (req, res) => {
     }
 
     const normalizedEmail = String(email || '').trim().toLowerCase();
+    const normalizedContactNumber = normalizePhilippineMobile(contactNumber);
     const normalizedAddress = normalizeAddressDetails(addressDetails);
     if (!isValidEmail(normalizedEmail)) {
       return res.status(400).json({ msg: 'Valid email address is required.' });
     }
-    if (isReservedEmbeddedIdentity({ username, email: normalizedEmail, contactNumber })) {
+    if (isReservedEmbeddedIdentity({ username, email: normalizedEmail, contactNumber: normalizedContactNumber })) {
       return res.status(400).json({ msg: 'These login details are reserved for barangay staff. Please use different resident details.' });
     }
 
@@ -498,22 +543,22 @@ router.post('/register', async (req, res) => {
     }
 
     // Validate Contact Number (Must be 11 digits)
-    if (!isValidPhilippineMobile(contactNumber)) {
+    if (!isValidPhilippineMobile(normalizedContactNumber)) {
       return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
     }
     if (!isStrongPassword(password)) {
       return res.status(400).json({ msg: 'Password must be at least 8 characters and include uppercase, lowercase, and 1 special character.' });
     }
 
-    let user = await User.findOne({ $or: [{ email: normalizedEmail }, { username }, { contactNumber }] });
+    let user = await User.findOne({ $or: [{ email: normalizedEmail }, { username }, { contactNumber: normalizedContactNumber }] });
     if (user) {
-      if (user.email === email) {
+      if (user.email === normalizedEmail) {
         return res.status(400).json({ msg: 'Email is already registered.' });
       }
       if (user.username === username) {
         return res.status(400).json({ msg: 'Username is already taken.' });
       }
-      if (user.contactNumber === contactNumber) {
+      if (user.contactNumber === normalizedContactNumber) {
         return res.status(400).json({ msg: 'Phone number is already registered.' });
       }
       return res.status(400).json({ msg: 'Account details already in use.' });
@@ -543,7 +588,7 @@ router.post('/register', async (req, res) => {
       lastName,
       address: mergedAddress,
       addressDetails: normalizedAddress,
-      contactNumber,
+      contactNumber: normalizedContactNumber,
       email: normalizedEmail,
       password,
       gender,
@@ -616,11 +661,19 @@ router.post('/login', async (req, res) => {
 
     const settings = await readSystemSettings();
     const lockoutMinutes = Number(settings.lockoutWindowMinutes) > 0 ? Number(settings.lockoutWindowMinutes) : 15;
-    const normalizedIdentifier = normalizeLoginIdentifier(identifier);
+    const rawIdentifier = String(identifier || '').trim();
+    const normalizedIdentifier = normalizeLoginIdentifier(rawIdentifier);
+    const normalizedPhoneIdentifier = normalizePhilippineMobile(rawIdentifier);
+    const loginIdentityFilters = [
+      { email: normalizedIdentifier },
+      { username: rawIdentifier },
+      ...(normalizedIdentifier && normalizedIdentifier !== rawIdentifier ? [{ username: normalizedIdentifier }] : []),
+      ...(isValidPhilippineMobile(normalizedPhoneIdentifier) ? [{ contactNumber: normalizedPhoneIdentifier }] : []),
+    ];
 
     // Check for user by Username OR Email OR Contact Number
     let user = await User.findOne({
-      $or: [{ email: normalizedIdentifier }, { contactNumber: identifier }, { username: identifier }]
+      $or: loginIdentityFilters
     });
     let actingChild = null;
 
@@ -631,7 +684,7 @@ router.post('/login', async (req, res) => {
             status: 'approved',
             $or: [
               { email: normalizedIdentifier },
-              { fullName: new RegExp(`^${String(identifier || '').trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, 'i') },
+              { fullName: new RegExp(`^${rawIdentifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, 'i') },
             ],
           },
         },
@@ -656,14 +709,20 @@ router.post('/login', async (req, res) => {
       return res.status(403).json({ msg: 'These login details are reserved for barangay staff. Please use the staff login account or register with a different resident email.' });
     }
 
-    if (user.lockUntil && user.lockUntil > new Date()) {
-      return res.status(423).json({
-        msg: 'Too many failed login attempts. Please use Forgot Password (OTP) or try again later.',
-      });
-    }
-
     // Check password
     const isMatch = await bcrypt.compare(password, user.password);
+    if (user.lockUntil && user.lockUntil > new Date()) {
+      if (isMatch && ['admin', 'superadmin'].includes(user.role)) {
+        user.failedLoginAttempts = 0;
+        user.lockUntil = null;
+        await user.save();
+      } else {
+        return res.status(423).json({
+          msg: 'Too many failed login attempts. Please use Forgot Password (OTP) or try again later.',
+        });
+      }
+    }
+
     if (!isMatch) {
       const attempts = (user.failedLoginAttempts || 0) + 1;
       const lockNow = attempts >= 3;
@@ -703,8 +762,6 @@ router.post('/login', async (req, res) => {
         ...(actingChild ? {
           actingChild: {
             id: actingChild._id?.toString?.() || '',
-            fullName: actingChild.fullName || '',
-            email: actingChild.email || '',
           },
         } : {}),
       },
@@ -759,6 +816,7 @@ router.get('/user', auth, async (req, res) => {
             id: freshChild._id?.toString?.() || '',
             fullName: freshChild.fullName || '',
             email: freshChild.email || '',
+            avatarImage: freshChild.avatarImage || '',
           }
         : req.user.actingChild || null;
     } else {
@@ -795,9 +853,10 @@ router.put('/user', auth, async (req, res) => {
     residentNote,
     children,
   } = req.body;
-  
+   
   // Build user object
   const userFields = {};
+  const normalizedProfileContactNumber = contactNumber ? normalizePhilippineMobile(contactNumber) : '';
   if (username) userFields.username = username;
   if (firstName) userFields.firstName = firstName;
   if (middleName) userFields.middleName = middleName;
@@ -807,7 +866,7 @@ router.put('/user', auth, async (req, res) => {
     userFields.addressDetails = normalizeAddressDetails(addressDetails);
     userFields.address = composeAddress(userFields.addressDetails);
   }
-  if (contactNumber) userFields.contactNumber = contactNumber;
+  if (normalizedProfileContactNumber) userFields.contactNumber = normalizedProfileContactNumber;
   const normalizedProfileEmail = email ? String(email).trim().toLowerCase() : '';
   if (normalizedProfileEmail) userFields.email = normalizedProfileEmail;
   if (avatarImage !== undefined) userFields.avatarImage = avatarImage;
@@ -836,11 +895,11 @@ router.put('/user', auth, async (req, res) => {
       if (usernameExists) return res.status(400).json({ msg: 'Username is already taken.' });
     }
 
-    if (contactNumber && contactNumber !== user.contactNumber) {
-      if (!isValidPhilippineMobile(contactNumber)) {
+    if (normalizedProfileContactNumber && normalizedProfileContactNumber !== user.contactNumber) {
+      if (!isValidPhilippineMobile(normalizedProfileContactNumber)) {
         return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
       }
-      const phoneExists = await User.findOne({ contactNumber, _id: { $ne: req.user.id } });
+      const phoneExists = await User.findOne({ contactNumber: normalizedProfileContactNumber, _id: { $ne: req.user.id } });
       if (phoneExists) return res.status(400).json({ msg: 'Phone number is already registered.' });
     }
 
@@ -1000,11 +1059,13 @@ router.post('/change-email/request-otp', auth, async (req, res) => {
       label: 'Email Change OTP',
       details: [{ label: 'New Email', value: normalizedNewEmail }],
     };
-    const sent = await sendUserMail({
+    const { sent, debugOtp } = await sendOtpMailWithFallback({
       to: normalizedNewEmail,
       subject: 'Confirm Email Change (BayanTrack OTP)',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
+      otp,
+      context: 'change-email-otp',
     });
 
     if (!sent) {
@@ -1012,7 +1073,7 @@ router.post('/change-email/request-otp', auth, async (req, res) => {
       return res.status(503).json({ msg: OTP_EMAIL_UNAVAILABLE_MESSAGE });
     }
 
-    return res.json({ msg: 'OTP sent to new email.' });
+    return res.json({ msg: 'OTP sent to new email.', debugOtp });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ msg: 'Failed to send OTP.' });
@@ -1042,11 +1103,13 @@ router.post('/change-password/request-otp', auth, async (req, res) => {
       otp,
       label: 'Password Change OTP',
     };
-    const sent = await sendUserMail({
+    const { sent, debugOtp } = await sendOtpMailWithFallback({
       to: user.email,
       subject: 'Confirm Password Change (BayanTrack OTP)',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
+      otp,
+      context: 'change-password-otp',
     });
 
     if (!sent) {
@@ -1054,7 +1117,7 @@ router.post('/change-password/request-otp', auth, async (req, res) => {
       return res.status(503).json({ msg: OTP_EMAIL_UNAVAILABLE_MESSAGE });
     }
 
-    return res.json({ msg: 'OTP sent to your registered email.' });
+    return res.json({ msg: 'OTP sent to your registered email.', debugOtp });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ msg: 'Failed to send OTP.' });
@@ -1101,11 +1164,13 @@ router.post('/child-access/request-otp', auth, async (req, res) => {
         { label: 'Relationship', value: child.relationship || 'Child' },
       ],
     };
-    const sent = await sendUserMail({
+    const { sent, debugOtp } = await sendOtpMailWithFallback({
       to: user.email,
       subject: 'Confirm Child Access Request (BayanTrack OTP)',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
+      otp,
+      context: 'child-access-otp',
     });
 
     if (!sent) {
@@ -1113,7 +1178,7 @@ router.post('/child-access/request-otp', auth, async (req, res) => {
       return res.status(503).json({ msg: OTP_EMAIL_UNAVAILABLE_MESSAGE });
     }
 
-    return res.json({ msg: 'OTP sent to your registered email.' });
+    return res.json({ msg: 'OTP sent to your registered email.', debugOtp });
   } catch (err) {
     console.error(err.message);
     return res.status(500).json({ msg: 'Failed to send child access OTP.' });
@@ -1210,6 +1275,7 @@ router.post('/child-session/request-otp', auth, async (req, res) => {
 
     const nextFullName = String(req.body.fullName || '').trim();
     const nextEmail = String(req.body.email || '').trim().toLowerCase();
+    const nextAvatarImage = normalizeOptionalImageDataUrl(req.body.avatarImage, 'Child profile photo');
     if (!nextFullName || !nextEmail) {
       return res.status(400).json({ msg: 'Child name and email are required.' });
     }
@@ -1244,13 +1310,16 @@ router.post('/child-session/request-otp', auth, async (req, res) => {
         { label: 'Parent', value: parentName || 'Resident' },
         { label: 'Child Full Name', value: nextFullName },
         { label: 'Child Email', value: nextEmail },
+        ...(nextAvatarImage ? [{ label: 'Profile Photo', value: 'New child profile photo selected' }] : []),
       ],
     };
-    const sent = await sendUserMail({
+    const { sent, debugOtp } = await sendOtpMailWithFallback({
       to: user.email,
       subject: 'Confirm Child Profile Update (BayanTrack OTP)',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
+      otp,
+      context: 'child-session-otp',
     });
 
     if (!sent) {
@@ -1258,9 +1327,12 @@ router.post('/child-session/request-otp', auth, async (req, res) => {
       return res.status(503).json({ msg: OTP_EMAIL_UNAVAILABLE_MESSAGE });
     }
 
-    return res.json({ msg: 'OTP sent to parent email.' });
+    return res.json({ msg: 'OTP sent to parent email.', debugOtp });
   } catch (err) {
     console.error(err.message);
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ msg: err.message });
+    }
     return res.status(500).json({ msg: 'Failed to send child profile OTP.' });
   }
 });
@@ -1284,6 +1356,7 @@ router.put('/child-session/update', auth, async (req, res) => {
 
     const nextFullName = String(req.body.fullName || '').trim();
     const nextEmail = String(req.body.email || '').trim().toLowerCase();
+    const nextAvatarImage = normalizeOptionalImageDataUrl(req.body.avatarImage, 'Child profile photo');
     const otp = String(req.body.otp || '').trim();
 
     if (!nextFullName || !nextEmail) {
@@ -1312,6 +1385,7 @@ router.put('/child-session/update', auth, async (req, res) => {
 
     child.fullName = nextFullName;
     child.email = nextEmail;
+    child.avatarImage = nextAvatarImage;
     await user.save();
     await Otp.deleteOne({ _id: validOtp._id });
 
@@ -1329,11 +1403,15 @@ router.put('/child-session/update', auth, async (req, res) => {
         id: child._id?.toString?.() || '',
         fullName: child.fullName || '',
         email: child.email || '',
+        avatarImage: child.avatarImage || '',
       },
       children: user.children || [],
     });
   } catch (err) {
     console.error(err.message);
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ msg: err.message });
+    }
     return res.status(500).json({ msg: 'Failed to update child session profile.' });
   }
 });
@@ -1369,11 +1447,13 @@ router.post('/forgot-password', async (req, res) => {
       otp,
       label: 'Password Reset OTP',
     };
-    const sent = await sendUserMail({
+    const { sent, debugOtp } = await sendOtpMailWithFallback({
       to: normalizedEmail,
       subject: 'Password Reset OTP (BayanTrack)',
       html: otpNoticeHtml(otpMail),
       text: otpNoticeText(otpMail),
+      otp,
+      context: 'forgot-password-otp',
     });
 
     if (!sent) {
@@ -1383,7 +1463,7 @@ router.post('/forgot-password', async (req, res) => {
       });
     }
 
-    res.json({ msg: "OTP sent successfully" });
+    res.json({ msg: "OTP sent successfully", debugOtp });
   } catch (err) {
     console.error(err);
     res.status(500).json({ msg: "Failed to send email." });

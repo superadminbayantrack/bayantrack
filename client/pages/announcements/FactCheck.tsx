@@ -4,7 +4,7 @@ import { Chatbot } from "@/components/Chatbot";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { Reveal } from "@/components/Reveal";
-import { api, authHeaders } from '@/lib/api';
+import { api, authHeaders, quietApi } from '@/lib/api';
 import { hasAuthSession } from '@/lib/auth';
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { EmergencySafetyRouteCard } from "@/components/EmergencySafetyRouteCard";
@@ -68,7 +68,7 @@ export default function FactCheck() {
       if (!hasAuthSession()) return;
 
       try {
-        const res = await api.get('/api/auth/user', { headers: authHeaders() });
+        const res = await quietApi.get('/api/auth/user', { headers: authHeaders() });
         const user = res.data || {};
         const fullName = [user.firstName, user.middleName, user.lastName].filter(Boolean).join(' ').trim();
         setReporter((prev) => ({

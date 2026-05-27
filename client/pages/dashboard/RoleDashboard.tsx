@@ -13,9 +13,11 @@ type FilterPanel = "users" | "announcements" | "reports" | "emergencyAlerts" | "
 type MonthlyDetailKind = "users" | "services" | "reports" | "messages";
 type RatingRange = "days" | "weeks" | "months" | "years";
 type SnapshotModal = "activities" | "queue" | null;
+type PreviewModalKind = "users" | "pending-approval" | "live-alerts" | "subscribers" | "announcements" | null;
 const MONTHLY_DETAIL_PAGE_SIZE = 5;
 const DASHBOARD_PAGE_SIZE = 5;
 const SNAPSHOT_PAGE_SIZE = 3;
+const PREVIEW_PAGE_SIZE = 3;
 const DEFAULT_ANNOUNCEMENT_FORM = {
   title: "",
   content: "",
@@ -32,6 +34,7 @@ const ANNOUNCEMENT_STATUS_OPTIONS = ["published", "pending", "ongoing", "resolve
 type TableFilterState = { search: string; date: string; time: string };
 type MobileDashboardAction = { label: string; run: () => void; tone?: "default" | "danger" };
 type SnapshotActionTarget = { title: string; subtitle: string; panel: Panel };
+type PreviewRow = { id: string; primary: string; secondary: string; status: string; details: string; createdAt?: string; eventTime?: string; onOpen: () => void };
 type PermissionFlags = { view: boolean; add: boolean; edit: boolean; archive: boolean; delete: boolean };
 type AdminPermissions = {
   officials: PermissionFlags;
@@ -196,12 +199,20 @@ function normalizeAdminPermissions(value?: Partial<AdminPermissions>): AdminPerm
 
 function Badge({ value }: { value: string }) {
   const v = value.toLowerCase();
-  const tone = v === "active" || v === "approved" || v === "resolved" || v === "completed" || v === "closed" || v === "read"
+  const tone = v === "active" || v === "approved" || v === "resolved" || v === "completed" || v === "closed" || v === "read" || v === "published"
     ? "bg-emerald-100 text-emerald-700"
-    : v === "pending" || v === "new" || v === "in-review"
+    : v === "pending" || v === "new" || v === "in-review" || v === "ongoing"
       ? "bg-amber-100 text-amber-700"
       : "bg-red-100 text-red-700";
   return <span className={`whitespace-nowrap rounded-full px-2 py-1 text-xs font-semibold ${tone}`}>{value}</span>;
+}
+
+function readableSlug(value: string | undefined | null) {
+  return String(value || "")
+    .replace(/[-_]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function truncateText(value: string | undefined | null, max = 80) {
@@ -621,6 +632,9 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [snapshotModal, setSnapshotModal] = useState<SnapshotModal>(null);
   const [snapshotPage, setSnapshotPage] = useState(1);
   const [snapshotActionTarget, setSnapshotActionTarget] = useState<SnapshotActionTarget | null>(null);
+  const [previewModal, setPreviewModal] = useState<PreviewModalKind>(null);
+  const [previewPage, setPreviewPage] = useState(1);
+  const [previewFilters, setPreviewFilters] = useState<TableFilterState>({ search: "", date: "", time: "" });
   const [mobileActionMenu, setMobileActionMenu] = useState<{ title: string; actions: MobileDashboardAction[] } | null>(null);
   const [restoreCategory, setRestoreCategory] = useState("users");
   const [reportSortOrder, setReportSortOrder] = useState<"newest" | "oldest">("newest");
@@ -963,6 +977,28 @@ export default function RoleDashboard({ role }: DashboardProps) {
     const dateMatch = !filters.date || toLocalDateInputValue(dateValue) === filters.date;
     const timeMatch = !filters.time || toLocalTimeInputValue(dateValue) === filters.time;
     return textMatch && dateMatch && timeMatch;
+  };
+  const updatePreviewFilter = (next: Partial<TableFilterState>) => {
+    setPreviewFilters((prev) => ({ ...prev, ...next }));
+    setPreviewPage(1);
+  };
+  const matchesPreviewFilters = (dateValue: string | undefined, timeValue: string | undefined, ...values: Array<string | number | undefined | null>) => {
+    const localSearch = normalizeSearch(previewFilters.search);
+    const textMatch = !localSearch || values.some((value) => String(value ?? "").toLowerCase().includes(localSearch));
+    const dateMatch = !previewFilters.date || toLocalDateInputValue(dateValue) === previewFilters.date;
+    const normalizedTime = timeValue && /^\d{2}:\d{2}/.test(timeValue) ? timeValue.slice(0, 5) : toLocalTimeInputValue(dateValue);
+    const timeMatch = !previewFilters.time || normalizedTime === previewFilters.time;
+    return textMatch && dateMatch && timeMatch;
+  };
+  const openPreviewModal = (kind: PreviewModalKind) => {
+    setPreviewModal(kind);
+    setPreviewPage(1);
+    setPreviewFilters({ search: "", date: "", time: "" });
+  };
+  const updateGlobalDateFilter = (value: string) => {
+    const nextDate = value || todayInputValue();
+    setNotificationLogDate(nextDate);
+    updateTableFilter("audit", { date: nextDate });
   };
 
   const scoreDashboardSearch = (...values: Array<string | number | undefined | null>) => {
@@ -1469,6 +1505,123 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const paginatedArchivedServices = paginateDashboardItems("restore-services", archivedServices);
   const paginatedArchivedMessages = paginateDashboardItems("restore-messages", archivedMessages);
   const paginatedArchivedSubscriptions = paginateDashboardItems("restore-subscribers", archivedSubscriptions);
+
+  const previewModalConfig = useMemo(() => {
+    if (!previewModal) return null;
+
+    const userRow = (user: UserItem, details: string): PreviewRow => ({
+      id: `user-preview-${user._id}`,
+      primary: userDisplayName(user) || user.username || "Resident account",
+      secondary: user.email || user.contactNumber || "No contact details",
+      status: user.status === "active" ? "approved" : user.status === "suspended" ? "suspended" : user.validIdStatus || "pending",
+      details,
+      createdAt: user.createdAt,
+      onOpen: () => {
+        setActivePanel("users");
+        setPreviewModal(null);
+        void openSelectedUser(user);
+      },
+    });
+
+    const liveAlertRow = (alert: EmergencyAlertItem): PreviewRow => ({
+      id: `live-alert-preview-${alert._id}`,
+      primary: alert.residentSnapshot?.fullName || alert.residentSnapshot?.username || alert.referenceNo,
+      secondary: alert.referenceNo,
+      status: alert.status,
+      details: alert.situation || "Live emergency alert",
+      createdAt: alert.createdAt || alert.updatedAt,
+      onOpen: () => {
+        setActivePanel("emergencyAlerts");
+        setPreviewModal(null);
+        setLiveAlertChatModal(alert);
+      },
+    });
+
+    const subscriberRow = (subscriber: Subscription): PreviewRow => ({
+      id: `subscriber-preview-${subscriber._id}`,
+      primary: subscriber.email,
+      secondary: subscriber.source || "Subscriber",
+      status: subscriber.status,
+      details: subscriber.adminComment || "Subscribed to barangay updates",
+      createdAt: subscriber.createdAt,
+      onOpen: () => {
+        setActivePanel("subscriptions");
+        setPreviewModal(null);
+        setSubscriptionManageModal(subscriber);
+      },
+    });
+
+    const announcementRow = (announcement: AnnouncementItem): PreviewRow => ({
+      id: `announcement-preview-${announcement._id}`,
+      primary: announcement.title,
+      secondary: readableSlug(announcement.module),
+      status: announcement.archived ? "archived" : announcement.status || "published",
+      details: [announcement.category, announcement.location, announcement.content].filter(Boolean).join(" - ") || "Announcement record",
+      createdAt: announcement.eventDate || announcement.createdAt,
+      eventTime: announcement.eventTime,
+      onOpen: () => {
+        setActivePanel("announcements");
+        setPreviewModal(null);
+        setAnnouncementEditModal(announcement);
+      },
+    });
+
+    const baseConfigs: Record<NonNullable<PreviewModalKind>, { eyebrow: string; title: string; subtitle: string; empty: string; rows: PreviewRow[] }> = {
+      users: {
+        eyebrow: "Users Preview",
+        title: "Users",
+        subtitle: "Current resident, admin, and superadmin accounts in the system.",
+        empty: "No users match the selected filters.",
+        rows: users.map((user) => userRow(user, `${user.role || "resident"} account - ${user.status || "pending"}`)),
+      },
+      "pending-approval": {
+        eyebrow: "Approval Preview",
+        title: "Pending Approval",
+        subtitle: "Resident accounts whose valid ID or approval status still needs checking.",
+        empty: "No pending approvals match the selected filters.",
+        rows: users.filter((user) => user.validIdStatus === "pending" || user.status === "pending").map((user) => userRow(user, `Approval status: ${user.validIdStatus || user.status || "pending"}`)),
+      },
+      "live-alerts": {
+        eyebrow: "Live Alert Preview",
+        title: "Live Alerts",
+        subtitle: "Current and recent live emergency alerts.",
+        empty: "No live alerts match the selected filters.",
+        rows: emergencyAlerts.map(liveAlertRow),
+      },
+      subscribers: {
+        eyebrow: "Subscriber Preview",
+        title: "Subscribers",
+        subtitle: "People subscribed to barangay updates and notifications.",
+        empty: "No subscribers match the selected filters.",
+        rows: subscriptions.map(subscriberRow),
+      },
+      announcements: {
+        eyebrow: "Announcement Preview",
+        title: "Announcements",
+        subtitle: "Published, pending, archived, and scheduled announcement records.",
+        empty: "No announcements match the selected filters.",
+        rows: announcements.map(announcementRow),
+      },
+    };
+
+    const config = baseConfigs[previewModal];
+    const rows = config.rows.filter((row) => matchesPreviewFilters(
+      row.createdAt,
+      row.eventTime,
+      row.primary,
+      row.secondary,
+      row.status,
+      row.details,
+    ));
+    return { ...config, rows };
+  }, [announcements, emergencyAlerts, previewFilters, previewModal, subscriptions, users]);
+
+  const previewTotalPages = Math.max(1, Math.ceil((previewModalConfig?.rows.length || 0) / PREVIEW_PAGE_SIZE));
+  const currentPreviewPage = Math.min(Math.max(1, previewPage), previewTotalPages);
+  const paginatedPreviewRows = (previewModalConfig?.rows || []).slice(
+    (currentPreviewPage - 1) * PREVIEW_PAGE_SIZE,
+    currentPreviewPage * PREVIEW_PAGE_SIZE,
+  );
 
   const hasModulePermission = (moduleKey: keyof AdminPermissions, action: keyof PermissionFlags) => {
     if (role === "superadmin") return true;
@@ -2206,6 +2359,24 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </div>
               ) : null}
             </div>
+            <div className="hidden shrink-0 gap-2 xl:grid xl:grid-cols-2">
+              <input
+                type="date"
+                value={activityLogDate}
+                onChange={(e) => updateGlobalDateFilter(e.target.value)}
+                className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 shadow-sm outline-none transition focus:border-slate-400"
+                aria-label="Dashboard activity date"
+                title="Filter activities and notifications by date"
+              />
+              <input
+                type="time"
+                value={tableFilters.audit.time}
+                onChange={(e) => updateTableFilter("audit", { time: e.target.value })}
+                className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 shadow-sm outline-none transition focus:border-slate-400"
+                aria-label="Dashboard activity time"
+                title="Filter activity list by time"
+              />
+            </div>
             <div
               className="relative"
               onMouseEnter={() => setShowAdminNotifications(true)}
@@ -2430,14 +2601,22 @@ export default function RoleDashboard({ role }: DashboardProps) {
           {activePanel === "overview" && (
             <section className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs text-slate-500">Users</p><p className="text-3xl font-bold">{stats.users}</p></div>
-                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs text-slate-500">Pending Approval</p><p className="text-3xl font-bold">{stats.pendingUsers}</p></div>
-                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs text-slate-500">Announcements</p><p className="text-3xl font-bold">{stats.announcements}</p></div>
-                <button className="rounded-xl border border-red-100 bg-red-50 p-5 text-left shadow-sm transition hover:bg-red-100" onClick={() => setActivePanel("emergencyAlerts")} type="button">
+                <button className="rounded-xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-300" onClick={() => openPreviewModal("users")} type="button">
+                  <p className="text-xs text-slate-500">Users</p><p className="text-3xl font-bold">{stats.users}</p>
+                </button>
+                <button className="rounded-xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-300" onClick={() => openPreviewModal("pending-approval")} type="button">
+                  <p className="text-xs text-slate-500">Pending Approval</p><p className="text-3xl font-bold">{stats.pendingUsers}</p>
+                </button>
+                <button className="rounded-xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-300" onClick={() => openPreviewModal("announcements")} type="button">
+                  <p className="text-xs text-slate-500">Announcements</p><p className="text-3xl font-bold">{stats.announcements}</p>
+                </button>
+                <button className="rounded-xl border border-red-100 bg-red-50 p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-200" onClick={() => openPreviewModal("live-alerts")} type="button">
                   <p className="text-xs text-red-700">Live Alerts</p>
                   <p className="text-3xl font-bold text-red-800">{stats.liveAlerts}</p>
                 </button>
-                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs text-slate-500">Subscribers</p><p className="text-3xl font-bold">{stats.subscribers}</p></div>
+                <button className="rounded-xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-300" onClick={() => openPreviewModal("subscribers")} type="button">
+                  <p className="text-xs text-slate-500">Subscribers</p><p className="text-3xl font-bold">{stats.subscribers}</p>
+                </button>
               </div>
               <div className="grid gap-4 xl:grid-cols-2">
                 <DonutStat title="Account Status Distribution" data={statusDonutData} />
@@ -2718,16 +2897,16 @@ export default function RoleDashboard({ role }: DashboardProps) {
               </div>
               <PanelSearchFilters value={tableFilters.announcements} onChange={(next) => updateTableFilter("announcements", next)} placeholder="Search announcements..." />
               <CategoryFilter title="Announcement Categories" options={announcementCategoryOptions} value={announcementCategory} onChange={setAnnouncementCategory} />
-              <div className="overflow-x-auto rounded-2xl border border-slate-200">
-                <table className="min-w-full table-fixed text-left text-sm">
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+                <table className="w-full min-w-[980px] table-fixed text-left text-sm">
                   <colgroup>
-                    <col className="w-[42%]" />
+                    <col className="w-[46%]" />
                     <col className="w-[16%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[11%]" />
                     <col className="w-[14%]" />
-                    <col className="w-[10%]" />
-                    <col className="w-[18%]" />
                   </colgroup>
-                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <thead className="border-b border-slate-200 bg-slate-50/80 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-4 py-3 font-semibold">Title</th>
                       <th className="px-4 py-3 font-semibold">Module</th>
@@ -2738,22 +2917,26 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   </thead>
                   <tbody>
                     {paginatedAnnouncements.items.map((a) => (
-                      <tr key={a._id} className="border-t border-slate-200 align-top">
-                        <td className="px-4 py-3">
+                      <tr key={a._id} className="border-t border-slate-100 align-middle transition hover:bg-slate-50/70">
+                        <td className="px-4 py-4">
                           <div className="min-w-0">
-                            <p className="text-[15px] font-semibold leading-5 text-slate-900" title={a.title}>{truncateText(a.title, 68)}</p>
-                            <p className="mt-1 text-[12px] leading-5 text-slate-500" title={a.content || "No content provided."}>{truncateText(a.content || "No content provided.", 96)}</p>
+                            <p className="truncate text-[15px] font-bold leading-5 text-slate-900" title={a.title}>{a.title}</p>
+                            <p className="mt-1 truncate text-[12px] leading-5 text-slate-500" title={a.content || "No content provided."}>{a.content || "No content provided."}</p>
                             {(a.eventDate || a.eventTime || a.location) && (
-                              <p className="mt-2 text-[11px] font-semibold text-slate-500" title={[a.eventDate, a.eventTime, a.location].filter(Boolean).join(" | ")}>
-                                {truncateText([a.eventDate, a.eventTime, a.location].filter(Boolean).join(" | "), 72)}
+                              <p className="mt-2 truncate text-[11px] font-semibold text-slate-500" title={[a.eventDate, a.eventTime, a.location].filter(Boolean).join(" | ")}>
+                                {[a.eventDate, a.eventTime, a.location].filter(Boolean).join(" | ")}
                               </p>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-[13px] leading-5 text-slate-700"><p className="truncate" title={a.module}>{a.module}</p></td>
-                        <td className="px-4 py-3 text-[13px] leading-5 text-slate-700"><p className="truncate" title={a.category}>{a.category}</p></td>
-                        <td className="px-4 py-3 align-middle"><div className="w-fit"><Badge value={a.archived ? "archived" : a.status || "published"} /></div></td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-4 text-[13px] leading-5 text-slate-700">
+                          <span className="inline-flex max-w-full rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[12px] font-semibold text-slate-600">
+                            <span className="truncate" title={readableSlug(a.module)}>{readableSlug(a.module)}</span>
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 text-[13px] leading-5 text-slate-700"><p className="truncate font-medium" title={a.category}>{a.category}</p></td>
+                        <td className="px-4 py-4 align-middle"><div className="w-fit"><Badge value={a.archived ? "archived" : a.status || "published"} /></div></td>
+                        <td className="px-4 py-4">
                           {renderActionControls(`Announcement ${a.title}`, (
                           <>
                             {hasModulePermission("announcements", "edit") && (
@@ -5123,6 +5306,78 @@ export default function RoleDashboard({ role }: DashboardProps) {
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {previewModalConfig && (
+        <div className={modalOverlay}>
+          <div className={`${modalCard} max-w-6xl`}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">{previewModalConfig.eyebrow}</p>
+                <h3 className="mt-1 text-xl font-bold text-slate-900">{previewModalConfig.title}</h3>
+                <p className="mt-1 text-sm text-slate-500">{previewModalConfig.subtitle}</p>
+              </div>
+              <button className={iconBtn} onClick={() => setPreviewModal(null)} type="button" title="Close preview" aria-label="Close preview"><X size={18} /></button>
+            </div>
+            <PanelSearchFilters value={previewFilters} onChange={updatePreviewFilter} placeholder={`Search ${previewModalConfig.title.toLowerCase()}...`} />
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+              <table className="w-full min-w-[980px] table-fixed text-left text-sm">
+                <colgroup>
+                  <col style={{ width: "25%" }} />
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "18%" }} />
+                  <col style={{ width: "16%" }} />
+                  <col style={{ width: "12%" }} />
+                </colgroup>
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Name / Title</th>
+                    <th className="px-4 py-3 font-semibold">Status</th>
+                    <th className="px-4 py-3 font-semibold">Details</th>
+                    <th className="px-4 py-3 font-semibold">Date / Time</th>
+                    <th className="px-4 py-3 text-center font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedPreviewRows.map((row) => (
+                    <tr key={row.id} className="border-t border-slate-200 align-top">
+                      <td className="px-4 py-3">
+                        <p className="truncate font-semibold text-slate-900" title={row.primary}>{row.primary}</p>
+                        <p className="mt-1 truncate text-xs text-slate-500" title={row.secondary}>{row.secondary}</p>
+                      </td>
+                      <td className="px-4 py-3"><Badge value={row.status} /></td>
+                      <td className="px-4 py-3">
+                        <p className="line-clamp-2 text-slate-600" title={row.details}>{row.details}</p>
+                      </td>
+                      <td className="px-4 py-3 text-xs font-semibold text-slate-500">
+                        {row.eventTime && row.createdAt ? `${formatDateOnly(row.createdAt)} ${row.eventTime}` : formatDateTime(row.createdAt)}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <button className={`${btnSecondary} px-3 py-2`} onClick={row.onOpen} type="button">
+                          <Eye size={14} className="mr-1.5" />
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {previewModalConfig.rows.length === 0 ? <p className="p-5 text-sm text-slate-500">{previewModalConfig.empty}</p> : null}
+            </div>
+            {previewModalConfig.rows.length > 0 && (
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs font-semibold text-slate-500">
+                  Showing {(currentPreviewPage - 1) * PREVIEW_PAGE_SIZE + 1}-{Math.min(currentPreviewPage * PREVIEW_PAGE_SIZE, previewModalConfig.rows.length)} of {previewModalConfig.rows.length}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button className={btnSecondary} onClick={() => setPreviewPage((page) => Math.max(1, page - 1))} disabled={currentPreviewPage <= 1} type="button">Previous</button>
+                  <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">Page {currentPreviewPage} of {previewTotalPages}</span>
+                  <button className={btnSecondary} onClick={() => setPreviewPage((page) => Math.min(previewTotalPages, page + 1))} disabled={currentPreviewPage >= previewTotalPages} type="button">Next</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

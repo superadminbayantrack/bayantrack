@@ -183,8 +183,8 @@ export default function Weather() {
                 { icon: Wind, label: 'Wind', value: weather.current.wind },
                 { icon: Cloud, label: 'Air Quality', value: weather.current.airQuality },
                 { icon: Thermometer, label: 'Heat Index', value: weather.current.heatIndex },
-              ].map((m, i) => (
-                <Reveal>
+              ].map((m) => (
+                <Reveal key={m.label}>
                   <div className="bg-white p-4 rounded-xl shadow-sm flex items-center gap-3">
                      <div className="bg-blue-50 text-blue-600 p-2 rounded-full"><m.icon size={20}/></div>
                      <div>

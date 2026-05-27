@@ -36,6 +36,9 @@ const DEFAULT_ADMIN_PERMISSIONS = {
   subscribers: { view: true, add: true, edit: true, archive: true, delete: true },
 };
 
+const LOCAL_ADMIN_PASSWORD = 'AdminBayanTrack2026!';
+const LOCAL_SUPERADMIN_PASSWORD = 'SuperAdminBayanTrack2026!';
+
 let dbInitialized = false;
 let dbInitPromise = null;
 
@@ -43,7 +46,7 @@ function getBootstrapAccounts() {
   return [
     {
       username: process.env.BOOTSTRAP_ADMIN_USERNAME || 'admin',
-      password: requireBootstrapSecret('BOOTSTRAP_ADMIN_PASSWORD', 'admin'),
+      password: requireBootstrapSecret('BOOTSTRAP_ADMIN_PASSWORD', LOCAL_ADMIN_PASSWORD),
       role: 'admin',
       firstName: 'Admin',
       lastName: 'Bayan Track',
@@ -53,7 +56,7 @@ function getBootstrapAccounts() {
     },
     {
       username: process.env.BOOTSTRAP_SUPERADMIN_USERNAME || 'superAdmin123',
-      password: requireBootstrapSecret('BOOTSTRAP_SUPERADMIN_PASSWORD', 'superAdmin123'),
+      password: requireBootstrapSecret('BOOTSTRAP_SUPERADMIN_PASSWORD', LOCAL_SUPERADMIN_PASSWORD),
       role: 'superadmin',
       firstName: 'Super',
       lastName: 'Admin',

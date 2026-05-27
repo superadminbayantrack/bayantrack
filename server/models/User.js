@@ -123,6 +123,7 @@ const UserSchema = new mongoose.Schema(
             email: { type: String, default: '' },
             birthDate: { type: String, required: true },
             relationship: { type: String, default: 'Child' },
+            avatarImage: { type: String, default: '' },
             status: {
               type: String,
               enum: ['pending', 'approved', 'rejected'],

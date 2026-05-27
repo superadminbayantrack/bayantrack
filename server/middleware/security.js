@@ -113,31 +113,41 @@ export function applySecurityMiddleware(app) {
 
   app.use(cookieParser());
   app.use(compression());
-  app.use(
-    helmet({
-      crossOriginEmbedderPolicy: false,
-      contentSecurityPolicy: {
-        useDefaults: true,
-        directives: {
-          defaultSrc: ["'self'"],
-          baseUri: ["'self'"],
-          objectSrc: ["'none'"],
-          frameAncestors: ["'none'"],
-          imgSrc: ["'self'", 'data:', 'https:'],
-          fontSrc: ["'self'", 'data:', 'https:'],
-          styleSrc: ["'self'", "'unsafe-inline'", 'https:'],
-          scriptSrc: ["'self'"],
-          connectSrc: ["'self'", 'https:', 'wss:'],
-          frameSrc: ["'self'", 'https://www.google.com', 'https://www.google.com/maps'],
-        },
+
+  const helmetMiddleware = helmet({
+    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        fontSrc: ["'self'", 'data:', 'https:'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https:'],
+        scriptSrc: ["'self'"],
+        connectSrc: ["'self'", 'https:', 'wss:'],
+        frameSrc: ["'self'", 'https://www.google.com', 'https://www.google.com/maps'],
       },
-      hsts: {
-        maxAge: 31536000,
-        includeSubDomains: true,
-        preload: false,
-      },
-    }),
-  );
+    },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: false,
+    },
+  });
+
+  app.use((req, res, next) => {
+    const isViteDevFrontend =
+      process.env.NODE_ENV !== 'production' && !req.path.startsWith('/api');
+
+    if (isViteDevFrontend) {
+      return next();
+    }
+
+    return helmetMiddleware(req, res, next);
+  });
 
   app.use('/api', apiLimiter);
   app.use('/api', sameOriginWriteGuard);

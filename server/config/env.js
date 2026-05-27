@@ -8,8 +8,24 @@ const INSECURE_JWT_VALUES = new Set([
 
 export const AUTH_COOKIE_NAME = 'bayantrack_session';
 
+function hasHostedRuntimeSignal() {
+  return Boolean(
+    process.env.VERCEL ||
+      process.env.VERCEL_ENV ||
+      process.env.CF_PAGES ||
+      process.env.NETLIFY ||
+      process.env.RENDER ||
+      process.env.FLY_APP_NAME ||
+      process.env.K_SERVICE,
+  );
+}
+
 export function isProductionEnv() {
-  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+  if (String(process.env.STRICT_PRODUCTION_ENV || '').toLowerCase() === 'true') {
+    return true;
+  }
+
+  return process.env.NODE_ENV === 'production' && hasHostedRuntimeSignal();
 }
 
 export function getRequiredEnv(name, { minLength = 1, productionOnly = false } = {}) {

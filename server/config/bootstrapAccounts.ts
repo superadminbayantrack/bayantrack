@@ -1,3 +1,8 @@
+import { isProductionEnv } from "./env.js";
+
+const LOCAL_ADMIN_PASSWORD = "AdminBayanTrack2026!";
+const LOCAL_SUPERADMIN_PASSWORD = "SuperAdminBayanTrack2026!";
+
 export type BootstrapAccount = {
   username: string;
   password: string;
@@ -18,10 +23,6 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
   subscribers: { view: true, add: true, edit: true, archive: true, delete: true },
 } as const;
 
-function isProductionEnv() {
-  return process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
-}
-
 function requireBootstrapSecret(name: string, fallback: string) {
   const value = process.env[name] || fallback;
   if (isProductionEnv() && value === fallback) {
@@ -34,7 +35,7 @@ export function getBootstrapAccounts(): BootstrapAccount[] {
   return [
     {
       username: process.env.BOOTSTRAP_ADMIN_USERNAME || "admin",
-      password: requireBootstrapSecret("BOOTSTRAP_ADMIN_PASSWORD", "admin"),
+      password: requireBootstrapSecret("BOOTSTRAP_ADMIN_PASSWORD", LOCAL_ADMIN_PASSWORD),
       role: "admin",
       firstName: "Admin",
       lastName: "Bayan Track",
@@ -44,7 +45,7 @@ export function getBootstrapAccounts(): BootstrapAccount[] {
     },
     {
       username: process.env.BOOTSTRAP_SUPERADMIN_USERNAME || "superAdmin123",
-      password: requireBootstrapSecret("BOOTSTRAP_SUPERADMIN_PASSWORD", "superAdmin123"),
+      password: requireBootstrapSecret("BOOTSTRAP_SUPERADMIN_PASSWORD", LOCAL_SUPERADMIN_PASSWORD),
       role: "superadmin",
       firstName: "Super",
       lastName: "Admin",

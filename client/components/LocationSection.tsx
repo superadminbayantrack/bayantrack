@@ -3,30 +3,39 @@ import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 
 export function LocationSection() {
+  const mapsUrl = "https://www.google.com/maps/search/?api=1&query=Barangay%20Mambog%20II%20Bacoor%20Cavite";
+
   return (
     <section className="py-24 bg-[#f8faff]">
       <div className="container mx-auto px-4 max-w-6xl">
         <div className="bg-white rounded-[40px] shadow-sm border border-gray-50 overflow-hidden flex flex-col lg:flex-row">
           {/* Map Side */}
           <div className="relative min-h-[320px] lg:w-2/3 lg:min-h-[400px]">
-            {/* Map Placeholder */}
-            <div className="absolute inset-0 bg-slate-100 flex items-center justify-center overflow-hidden">
-              {/* Replace this div with your actual map component */} 
-              <iframe
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d15456.831041076723!2d120.95071224093299!3d14.415183659068795!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397d2465cce9473%3A0xbefd6c666643cbf7!2sMambog%20III%2C%20Bacoor%2C%20Cavite!5e0!3m2!1sen!2sph!4v1771863994986!5m2!1sen!2sph"
-                width="100%"
-                height="100%"
-                className="h-full w-full border-0 opacity-100"
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                title="Barangay map"
-              >
-              </iframe>
-             
-             
-    
-              
-
+            <div className="absolute inset-0 overflow-hidden bg-[#eaf1f8]">
+              <div className="absolute inset-0 opacity-80 [background-image:linear-gradient(#c8d7e8_1px,transparent_1px),linear-gradient(90deg,#c8d7e8_1px,transparent_1px)] [background-size:44px_44px]" />
+              <div className="absolute left-[18%] top-[22%] h-28 w-44 rounded-full border-8 border-white/70" />
+              <div className="absolute bottom-[18%] right-[12%] h-24 w-56 rounded-full border-8 border-blue-200/70" />
+              <div className="absolute left-0 right-0 top-1/2 h-6 -translate-y-1/2 bg-white/80 shadow-sm" />
+              <div className="absolute bottom-0 left-1/3 top-0 w-5 -rotate-12 bg-white/80 shadow-sm" />
+              <div className="absolute inset-0 flex items-center justify-center p-8">
+                <div className="w-full max-w-sm rounded-3xl border border-white/80 bg-white/95 p-6 text-center shadow-xl">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+                    <MapPin className="h-7 w-7" />
+                  </div>
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-500">Barangay location</p>
+                  <h4 className="mt-2 text-2xl font-extrabold text-primary">Mambog II, Bacoor</h4>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">Open the route directly in Google Maps for directions and live map details.</p>
+                  <a
+                    href={mapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-5 inline-flex items-center justify-center gap-2 rounded-xl bg-[#3b528a] px-4 py-3 text-sm font-bold text-white transition hover:bg-[#2e4170]"
+                  >
+                    <Navigation className="h-4 w-4" />
+                    Open Google Maps
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
 

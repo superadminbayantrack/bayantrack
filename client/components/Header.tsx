@@ -5,8 +5,8 @@ import { LogoutConfirmation } from '@/components/LogoutConfirmation';
 import { Button } from "@/components/ui/button";
 import { User, ChevronDown, Menu, Bell, CheckCircle2, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { clearAuthSession, hasAuthSession } from "@/lib/auth";
-import { api } from "@/lib/api";
+import { clearAuthSession, getAuthSessionMeta, hasAuthSession } from "@/lib/auth";
+import { api, quietApi } from "@/lib/api";
 import brandLogo from "../../assets/brandlogo/brand_logo.png";
 import {
   DropdownMenu,
@@ -32,11 +32,29 @@ export function Header() {
   const [showNotificationsModal, setShowNotificationsModal] = React.useState(false);
   const [isAnnouncementsMenuOpen, setIsAnnouncementsMenuOpen] = React.useState(false);
   const [brandText, setBrandText] = React.useState("BayanTrack");
+  const sessionMeta = getAuthSessionMeta();
+
+  const fetchUser = React.useCallback(async () => {
+    if (!hasAuthSession()) {
+      setUser(null);
+      return;
+    }
+
+    try {
+      const res = await quietApi.get("/api/auth/user");
+      setUser(res.data);
+    } catch (err) {
+      if ((err as any)?.response?.status !== 401) {
+        console.error("Failed to fetch user", err);
+      }
+      setUser(null);
+    }
+  }, []);
 
   const fetchNotifications = React.useCallback(async () => {
     if (!hasAuthSession()) return;
     try {
-      const res = await api.get("/api/auth/notifications");
+      const res = await quietApi.get("/api/auth/notifications");
       setNotifications(res.data?.items || []);
     } catch (_err) {
       setNotifications([]);
@@ -44,18 +62,11 @@ export function Header() {
   }, []);
 
   React.useEffect(() => {
-    const fetchUser = async () => {
-      if (hasAuthSession()) {
-        try {
-          const res = await api.get("/api/auth/user");
-          setUser(res.data);
-        } catch (err) {
-          console.error("Failed to fetch user", err);
-        }
-      }
-    };
-    fetchUser();
-  }, []);
+    void fetchUser();
+    const refreshUser = () => void fetchUser();
+    window.addEventListener("bayantrack:user-updated", refreshUser);
+    return () => window.removeEventListener("bayantrack:user-updated", refreshUser);
+  }, [fetchUser]);
 
   React.useEffect(() => {
     void fetchNotifications();
@@ -133,6 +144,15 @@ export function Header() {
     }, 3000);
   };
 
+  const displayAvatar = user?.actingChild?.avatarImage || user?.avatarImage || "";
+  const displayName = user?.actingChild
+    ? user.actingChild.fullName || user.actingChild.email || "Child user"
+    : sessionMeta?.actingChild
+      ? sessionMeta.actingChild.fullName || sessionMeta.actingChild.email || "Child user"
+    : [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.username || "Resident";
+  const displayEmail = user?.actingChild?.email || sessionMeta?.actingChild?.email || user?.email || "";
+  const showProfileCard = Boolean(user || sessionMeta?.actingChild);
+
   return (
     <>
     <header className="fixed top-0 z-50 w-full border-b border-gray-100 bg-white shadow-sm">
@@ -201,8 +221,8 @@ export function Header() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
-                {user?.avatarImage ? (
-                  <img src={user.avatarImage} alt="Profile" className="h-10 w-10 rounded-full object-cover" />
+                {displayAvatar ? (
+                  <img src={displayAvatar} alt="Profile" className="h-10 w-10 rounded-full object-cover" />
                 ) : (
                   <User className="w-5 h-5" />
                 )}
@@ -210,14 +230,14 @@ export function Header() {
             </DropdownMenuTrigger>
 
             <DropdownMenuContent align="end" className="w-56 p-2">
-              {user && (
+              {showProfileCard && (
                 <>
                   <div className="px-2 py-1.5">
-                    <p className="text-sm font-bold text-slate-900">{user.firstName} {user.lastName}</p>
-                    <p className="text-xs text-slate-500 truncate">{user.email}</p>
-                    {user.actingChild ? (
+                    <p className="text-sm font-bold text-slate-900">{displayName}</p>
+                    <p className="text-xs text-slate-500 truncate">{displayEmail}</p>
+                    {user?.actingChild || sessionMeta?.actingChild ? (
                       <p className="mt-1 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
-                        Child user: {user.actingChild.fullName || user.actingChild.email}
+                        Child session under parent account
                       </p>
                     ) : null}
                   </div>
@@ -349,8 +369,8 @@ export function Header() {
           <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
             {notifications.length === 0 ? (
               <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">No notifications right now.</p>
-            ) : notifications.map((item) => (
-              <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            ) : notifications.map((item, index) => (
+              <div key={item.id || item.referenceNo || `${item.title || "notification"}-${item.createdAt || index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-bold text-slate-900">{item.title}</p>

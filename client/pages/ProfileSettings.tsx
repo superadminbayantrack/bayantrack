@@ -3,8 +3,8 @@ import { User, Info, Clock, X, Eye, EyeOff, MoreHorizontal, Send, Trash2, Search
 import { Chatbot } from "@/components/Chatbot";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
-import { api, authHeaders } from "@/lib/api";
-import { clearAuthSession } from "@/lib/auth";
+import { api, authHeaders, quietApi } from "@/lib/api";
+import { setAuthSession } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import { Reveal } from "@/components/Reveal";
 import { FeedbackModal } from "@/components/FeedbackModal";
@@ -47,6 +47,7 @@ type ChildLink = {
   email: string;
   birthDate: string;
   relationship: string;
+  avatarImage?: string;
   status?: "pending" | "approved" | "rejected";
   reviewReason?: string;
 };
@@ -55,20 +56,51 @@ type ActingChild = {
   id?: string;
   fullName?: string;
   email?: string;
+  avatarImage?: string;
 };
 
 type ChildSessionForm = {
   fullName: string;
   email: string;
+  avatarImage: string;
 };
 
 const RELATIONSHIP_OPTIONS = ["Child", "Son", "Daughter", "Stepchild", "Ward", "Dependent"];
+const RESIDENT_FAQS = [
+  {
+    question: "How do I add a linked child?",
+    answer: "Go to Profile Settings, add the child's name, email, birth date, and relationship, then verify it with the OTP sent to the parent email.",
+  },
+  {
+    question: "How do I update my child's profile?",
+    answer: "Use Child Session mode. BayanTrack will send an OTP to the parent email before saving the child name, email, and photo.",
+  },
+  {
+    question: "How do I use the chatbot?",
+    answer: "Open the chatbot for quick help, barangay guidance, service shortcuts, and emergency support guidance.",
+  },
+  {
+    question: "How do I report an issue?",
+    answer: "Use Report Issue to submit concerns, add details, and attach photos if needed so the barangay can review them.",
+  },
+  {
+    question: "What if I do not receive an OTP?",
+    answer: "Check spam or promotions first, confirm your email is correct, then resend the OTP or contact support if mail is still unavailable.",
+  },
+];
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const digitOnly = (value: string, max = 11) => value.replace(/\D/g, "").slice(0, max);
 const cleanAddressValue = (value: string) => value.replace(/\s+/g, " ").trim();
 const stripAddressPrefix = (value: string, prefix: "blk" | "lot") => (
   cleanAddressValue(value).replace(new RegExp(`^${prefix}\\.?\\s*`, "i"), "")
 );
+const appendDevOtp = (message: string, _debugOtp?: string) => message;
+const getChildInitials = (value?: string) => {
+  const parts = String(value || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "CH";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ""}${parts[parts.length - 1][0] || ""}`.toUpperCase();
+};
 const getAgeFromBirthDate = (birthDate: string) => {
   const birth = new Date(birthDate);
   if (Number.isNaN(birth.getTime())) return null;
@@ -134,7 +166,7 @@ export default function ProfileSettings() {
   const [addressDetails, setAddressDetails] = useState<AddressDetails>(DEFAULT_ADDRESS);
   const [children, setChildren] = useState<ChildLink[]>([]);
   const [actingChild, setActingChild] = useState<ActingChild | null>(null);
-  const [childSessionForm, setChildSessionForm] = useState<ChildSessionForm>({ fullName: "", email: "" });
+  const [childSessionForm, setChildSessionForm] = useState<ChildSessionForm>({ fullName: "", email: "", avatarImage: "" });
   const [feedback, setFeedback] = useState<{ isOpen: boolean; title: string; message: string; type: "success" | "error" }>({
     isOpen: false,
     title: "",
@@ -167,16 +199,61 @@ export default function ProfileSettings() {
 
   const fetchProfile = async () => {
     try {
-      const [userRes, activityRes] = await Promise.all([
-        api.get("/api/auth/user", { headers: authHeaders() }),
-        api.get("/api/admin/activity/me", { headers: authHeaders() }),
+      const [userResult, activityResult] = await Promise.allSettled([
+        quietApi.get("/api/auth/user"),
+        quietApi.get("/api/admin/activity/me", { headers: authHeaders() }),
       ]);
 
-      const user = userRes.data;
+      if (userResult.status !== "fulfilled") {
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+        const retryUserResult = await quietApi.get("/api/auth/user").catch((err) => ({ error: err }));
+        if ("error" in retryUserResult) {
+          setFeedback({
+            isOpen: true,
+            title: "Session Refreshing",
+            message: "We could not refresh your profile yet. Please wait a moment, then reload Profile Settings.",
+            type: "error",
+          });
+          return;
+        }
+        const user = retryUserResult.data;
+        setActingChild(user.actingChild || null);
+        setChildSessionForm({
+          fullName: user.actingChild?.fullName || "",
+          email: user.actingChild?.email || "",
+          avatarImage: user.actingChild?.avatarImage || "",
+        });
+        setFormData((prev) => ({
+          ...prev,
+          username: user.username || "",
+          firstName: user.firstName || "",
+          middleName: user.middleName || "",
+          lastName: user.lastName || "",
+          email: user.email || "",
+          contactNumber: user.contactNumber || "",
+          gender: user.gender || "prefer-not-to-say",
+          civilStatus: user.civilStatus || "single",
+          marriageContractImage: user.marriageContractImage || "",
+          avatarImage: user.avatarImage || "",
+          newPassword: "",
+          confirmNewPassword: "",
+        }));
+        setOriginalEmail(user.email || "");
+        setAddressDetails({
+          ...DEFAULT_ADDRESS,
+          ...(user.addressDetails || {}),
+        });
+        setChildren(Array.isArray(user.children) ? user.children : []);
+        setActivities([]);
+        return;
+      }
+
+      const user = userResult.value.data;
       setActingChild(user.actingChild || null);
       setChildSessionForm({
         fullName: user.actingChild?.fullName || "",
         email: user.actingChild?.email || "",
+        avatarImage: user.actingChild?.avatarImage || "",
       });
       setFormData((prev) => ({
         ...prev,
@@ -201,12 +278,13 @@ export default function ProfileSettings() {
       });
       setChildren(Array.isArray(user.children) ? user.children : []);
 
-      setActivities(Array.isArray(activityRes.data) ? activityRes.data : activityRes.data?.items || []);
-    } catch (err: any) {
-      if (err.response?.status === 401) {
-        clearAuthSession();
-        navigate("/login");
+      if (activityResult.status === "fulfilled") {
+        setActivities(Array.isArray(activityResult.value.data) ? activityResult.value.data : activityResult.value.data?.items || []);
+      } else {
+        setActivities([]);
       }
+    } catch (err) {
+      console.error("Failed to load profile settings:", err);
     }
   };
 
@@ -276,9 +354,9 @@ export default function ProfileSettings() {
     setChildOtpModal({ isOpen: true, index, otp: "", sending: true, verifying: false });
     try {
       setChildRequestProgress(34);
-      await api.post("/api/auth/child-access/request-otp", { child }, { headers: authHeaders() });
+      const res = await api.post("/api/auth/child-access/request-otp", { child }, { headers: authHeaders() });
       setChildRequestProgress(52);
-      setFeedback({ isOpen: true, title: "OTP Sent", message: "A child access OTP was sent to your registered email.", type: "success" });
+      setFeedback({ isOpen: true, title: "OTP Sent", message: appendDevOtp("A child access OTP was sent to your registered email.", res.data?.debugOtp), type: "success" });
       setChildOtpModal((prev) => ({ ...prev, sending: false }));
     } catch (err: any) {
       setChildRequestProgress(0);
@@ -343,13 +421,13 @@ export default function ProfileSettings() {
     if (isEmailChanged && !emailOtp) {
       setOtpSending(true);
       try {
-        await api.post(
+        const res = await api.post(
           "/api/auth/change-email/request-otp",
           { newEmail: normalizedEmail },
           { headers: authHeaders() },
         );
         setShowEmailOtpModal(true);
-        setFeedback({ isOpen: true, title: "OTP Sent", message: "Check your new email for the OTP code to confirm the change.", type: "success" });
+        setFeedback({ isOpen: true, title: "OTP Sent", message: appendDevOtp("Check your new email for the OTP code to confirm the change.", res.data?.debugOtp), type: "success" });
       } catch (err: any) {
         setFeedback({ isOpen: true, title: "OTP Failed", message: err.response?.data?.msg || "Could not send OTP to the new email.", type: "error" });
       } finally {
@@ -361,9 +439,9 @@ export default function ProfileSettings() {
     if (isPasswordChanged && !passwordOtp) {
       setOtpSending(true);
       try {
-        await api.post("/api/auth/change-password/request-otp", {}, { headers: authHeaders() });
+        const res = await api.post("/api/auth/change-password/request-otp", {}, { headers: authHeaders() });
         setShowPasswordOtpModal(true);
-        setFeedback({ isOpen: true, title: "OTP Sent", message: "Check your registered email for the password-change OTP.", type: "success" });
+        setFeedback({ isOpen: true, title: "OTP Sent", message: appendDevOtp("Check your registered email for the password-change OTP.", res.data?.debugOtp), type: "success" });
       } catch (err: any) {
         setFeedback({ isOpen: true, title: "OTP Failed", message: err.response?.data?.msg || "Could not send password OTP.", type: "error" });
       } finally {
@@ -415,6 +493,7 @@ export default function ProfileSettings() {
       setPasswordOtp("");
       setShowPasswordOtpModal(false);
       await fetchProfile();
+      window.dispatchEvent(new Event("bayantrack:user-updated"));
     } catch (err: any) {
       setFeedback({ isOpen: true, title: "Update Failed", message: err.response?.data?.msg || "Failed to update profile", type: "error" });
     } finally {
@@ -448,6 +527,22 @@ export default function ProfileSettings() {
     reader.readAsDataURL(file);
   };
 
+  const handleChildSessionAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const maxBytes = 2 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      setFeedback({ isOpen: true, title: "Image Too Large", message: "Child profile image must be 2MB or below.", type: "error" });
+      e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setChildSessionForm((prev) => ({ ...prev, avatarImage: String(reader.result || "") }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleMarriageContractUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -467,8 +562,8 @@ export default function ProfileSettings() {
   const handleResendEmailOtp = async () => {
     setOtpSending(true);
     try {
-      await api.post("/api/auth/change-email/request-otp", { newEmail: formData.email }, { headers: authHeaders() });
-      setFeedback({ isOpen: true, title: "OTP Resent", message: "A new OTP was sent to your new email address.", type: "success" });
+      const res = await api.post("/api/auth/change-email/request-otp", { newEmail: formData.email }, { headers: authHeaders() });
+      setFeedback({ isOpen: true, title: "OTP Resent", message: appendDevOtp("A new OTP was sent to your new email address.", res.data?.debugOtp), type: "success" });
     } catch (err: any) {
       setFeedback({ isOpen: true, title: "OTP Failed", message: err.response?.data?.msg || "Could not resend OTP.", type: "error" });
     } finally {
@@ -521,9 +616,9 @@ export default function ProfileSettings() {
     }
     setChildSessionOtpModal({ isOpen: true, otp: "", sending: true, verifying: false });
     try {
-      await api.post("/api/auth/child-session/request-otp", { ...childSessionForm, email: normalizedChildEmail }, { headers: authHeaders() });
+      const res = await api.post("/api/auth/child-session/request-otp", { ...childSessionForm, email: normalizedChildEmail }, { headers: authHeaders() });
       setChildSessionOtpModal((prev) => ({ ...prev, sending: false }));
-      setFeedback({ isOpen: true, title: "OTP Sent", message: "A verification OTP was sent to the parent email before updating the child profile.", type: "success" });
+      setFeedback({ isOpen: true, title: "OTP Sent", message: appendDevOtp("A verification OTP was sent to the parent email before updating the child profile.", res.data?.debugOtp), type: "success" });
     } catch (err: any) {
       setChildSessionOtpModal({ isOpen: false, otp: "", sending: false, verifying: false });
       setFeedback({ isOpen: true, title: "OTP Failed", message: err.response?.data?.msg || "Could not send child session OTP.", type: "error" });
@@ -540,9 +635,19 @@ export default function ProfileSettings() {
       const res = await api.put("/api/auth/child-session/update", { ...childSessionForm, email: childSessionForm.email.trim().toLowerCase(), otp: childSessionOtpModal.otp }, { headers: authHeaders() });
       setActingChild(res.data?.actingChild || actingChild);
       setChildren(Array.isArray(res.data?.children) ? res.data.children : children);
+      setAuthSession(undefined, "resident", {
+        actingChild: res.data?.actingChild
+          ? {
+              id: res.data.actingChild.id,
+              fullName: res.data.actingChild.fullName,
+              email: res.data.actingChild.email,
+            }
+          : null,
+      });
       setChildSessionOtpModal({ isOpen: false, otp: "", sending: false, verifying: false });
       setFeedback({ isOpen: true, title: "Child Profile Updated", message: "The linked child profile was updated successfully.", type: "success" });
       await fetchProfile();
+      window.dispatchEvent(new Event("bayantrack:user-updated"));
     } catch (err: any) {
       setChildSessionOtpModal((prev) => ({ ...prev, verifying: false }));
       setFeedback({ isOpen: true, title: "Update Failed", message: err.response?.data?.msg || "Could not update child profile.", type: "error" });
@@ -578,11 +683,46 @@ export default function ProfileSettings() {
                 </p>
               </div>
 
+              <section className="mb-8 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-bold text-[#1e3a8a]">Resident Help</h2>
+                    <p className="mt-1 text-xs text-slate-500">Quick guidance for linked children, chatbot use, reports, and OTP requests.</p>
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {RESIDENT_FAQS.map((item) => (
+                    <details key={item.question} className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                      <summary className="cursor-pointer list-none text-sm font-semibold text-slate-800">
+                        {item.question}
+                      </summary>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">{item.answer}</p>
+                    </details>
+                  ))}
+                </div>
+              </section>
+
               {isChildSession ? (
                 <div className="space-y-5">
                   <section className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
                     <h2 className="text-sm font-bold text-[#1e3a8a]">Child Session Details</h2>
                     <div className="rounded-lg border border-slate-200 bg-white p-4">
+                      <div className="mb-5 flex flex-wrap items-center gap-4">
+                        <img
+                          src={childSessionForm.avatarImage || "https://placehold.co/100x100/e2e8f0/475569?text=Child"}
+                          alt="Child profile"
+                          className="h-16 w-16 rounded-full border border-gray-200 object-cover"
+                        />
+                        <input ref={(el) => { avatarInputRef.current = el; }} type="file" accept="image/*" onChange={handleChildSessionAvatarUpload} className="hidden" />
+                        <button
+                          type="button"
+                          onClick={() => avatarInputRef.current?.click()}
+                          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          Choose Child Photo
+                        </button>
+                        <p className="text-xs text-slate-500">This will send an OTP to the parent email before saving the child profile.</p>
+                      </div>
                       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                         <div className="space-y-1.5">
                           <label className="block text-xs font-bold text-gray-800">Parent Account Name</label>
@@ -614,7 +754,7 @@ export default function ProfileSettings() {
                         <button type="button" onClick={handleChildSessionRequestOtp} className="rounded-md border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
                           Send Parent OTP
                         </button>
-                        <p className="self-center text-xs text-slate-500">Only child name and child email can be updated in child-session mode.</p>
+                        <p className="self-center text-xs text-slate-500">Child name, email, and profile photo can be updated in child-session mode.</p>
                       </div>
                     </div>
                   </section>
@@ -788,7 +928,27 @@ export default function ProfileSettings() {
                   <p className="text-xs text-slate-500">Linked records must include full name, email, and a birth date showing 18 years old or above before they can be submitted for barangay review.</p>
                   <div className="space-y-3">
                     {children.map((child, index) => (
-                      <div key={index} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-[1.4fr,1.2fr,1fr,1.25fr]">
+                      <div key={child._id || index} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-[auto,1.1fr,1fr,0.95fr,1.2fr] md:items-start">
+                        <div className="flex items-center gap-3 rounded-md border border-slate-100 bg-slate-50 px-3 py-2">
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-white">
+                            {child.avatarImage ? (
+                              <img
+                                src={child.avatarImage}
+                                alt={child.fullName || "Linked child"}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-[11px] font-bold text-slate-500">
+                                {getChildInitials(child.fullName)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-400">Linked Child</p>
+                            <p className="truncate text-sm font-semibold text-slate-900">{child.fullName || "Linked child"}</p>
+                            <p className="truncate text-xs text-slate-500">{child.email || "No child email yet"}</p>
+                          </div>
+                        </div>
                         <div className="space-y-1.5">
                           <label className="block text-xs font-bold text-gray-800">Child Full Name</label>
                           <input className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700" value={child.fullName} onChange={(e) => handleChildChange(index, "fullName", e.target.value)} />
@@ -820,7 +980,7 @@ export default function ProfileSettings() {
                           </div>
                         </div>
                         {childOtpModal.index === index && childRequestProgress > 0 ? (
-                          <div className="md:col-span-4">
+                          <div className="md:col-span-5">
                             <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-slate-500">
                               <span>{childRequestProgress >= 100 ? "Request submitted to admin" : "Syncing child access request"}</span>
                               <span>{childRequestProgress}%</span>
@@ -846,6 +1006,7 @@ export default function ProfileSettings() {
                           type={showNewPassword ? "text" : "password"}
                           className="w-full rounded-md border border-gray-300 p-2.5 pr-10 text-sm text-gray-700"
                           name="newPassword"
+                          autoComplete="new-password"
                           placeholder="Input a password"
                           value={formData.newPassword}
                           onChange={handleInputChange}
@@ -866,6 +1027,7 @@ export default function ProfileSettings() {
                           type={showConfirmPassword ? "text" : "password"}
                           className="w-full rounded-md border border-gray-300 p-2.5 pr-10 text-sm text-gray-700"
                           name="confirmNewPassword"
+                          autoComplete="new-password"
                           placeholder="Confirm your password"
                           value={formData.confirmNewPassword}
                           onChange={handleInputChange}
@@ -1252,8 +1414,8 @@ export default function ProfileSettings() {
                 onClick={async () => {
                   setOtpSending(true);
                   try {
-                    await api.post("/api/auth/change-password/request-otp", {}, { headers: authHeaders() });
-                    setFeedback({ isOpen: true, title: "OTP Resent", message: "A new OTP was sent to your registered email.", type: "success" });
+                    const res = await api.post("/api/auth/change-password/request-otp", {}, { headers: authHeaders() });
+                    setFeedback({ isOpen: true, title: "OTP Resent", message: appendDevOtp("A new OTP was sent to your registered email.", res.data?.debugOtp), type: "success" });
                   } catch (err: any) {
                     setFeedback({ isOpen: true, title: "OTP Failed", message: err.response?.data?.msg || "Could not resend OTP.", type: "error" });
                   } finally {

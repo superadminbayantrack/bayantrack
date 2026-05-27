@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowRight, Bot, FileText, Megaphone, ShieldAlert, UserCog, X } from "lucide-react";
 import { getRole, hasAuthSession } from "@/lib/auth";
-import { api } from "@/lib/api";
+import { quietApi } from "@/lib/api";
 
 const TOUR_STORAGE_KEY = "bayantrack_resident_quick_tour_seen";
 const NEW_ACCOUNT_TOUR_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -62,7 +62,7 @@ export function ResidentQuickTour() {
     const maybeOpenTour = async () => {
       if (isBlocked || !hasAuthSession() || getRole() !== "resident") return;
       try {
-        const res = await api.get("/api/auth/user");
+        const res = await quietApi.get("/api/auth/user");
         const tourReferenceAt = new Date(res.data?.statusReviewedAt || res.data?.createdAt || "").getTime();
         const isNewAccount = Number.isFinite(tourReferenceAt) && Date.now() - tourReferenceAt <= NEW_ACCOUNT_TOUR_WINDOW_MS;
         const accountKey = `${TOUR_STORAGE_KEY}:${res.data?._id || res.data?.email || "resident"}`;
