@@ -3,7 +3,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { clearAuthSession, getRole, hasAuthSession, hasChildSession } from "@/lib/auth";
 
-const RESIDENT_FOCUS_TIMEOUT_MS = 3 * 60 * 1000;
+const RESIDENT_FOCUS_TIMEOUT_MS = 2 * 60 * 1000;
+const CHILD_FOCUS_TIMEOUT_MS = 2 * 60 * 1000;
+const ADMIN_FOCUS_TIMEOUT_MS = 3 * 60 * 1000;
+const SUPERADMIN_FOCUS_TIMEOUT_MS = 3 * 60 * 1000;
 
 export function ResidentSessionSafety() {
   const location = useLocation();
@@ -13,12 +16,22 @@ export function ResidentSessionSafety() {
 
   useEffect(() => {
     const isLoginRoute = location.pathname === "/" || location.pathname === "/login";
-    const isResidentSession = !isLoginRoute && hasAuthSession() && getRole() === "resident";
+    const role = getRole();
     const isChildSession = hasChildSession();
-    if (!isResidentSession || isChildSession) return;
+    const timeoutMs = isChildSession
+      ? CHILD_FOCUS_TIMEOUT_MS
+      : role === "admin"
+        ? ADMIN_FOCUS_TIMEOUT_MS
+        : role === "superadmin"
+          ? SUPERADMIN_FOCUS_TIMEOUT_MS
+          : role === "resident"
+            ? RESIDENT_FOCUS_TIMEOUT_MS
+            : null;
+
+    if (isLoginRoute || !hasAuthSession() || !timeoutMs) return;
 
     const clearTimer = () => {
-      if (timeoutRef.current) {
+      if (timeoutRef.current !== null) {
         window.clearTimeout(timeoutRef.current);
         timeoutRef.current = null;
       }
@@ -35,7 +48,7 @@ export function ResidentSessionSafety() {
     const startAwayTimer = () => {
       if (!awaySinceRef.current) awaySinceRef.current = Date.now();
       clearTimer();
-      timeoutRef.current = window.setTimeout(logoutForSafety, RESIDENT_FOCUS_TIMEOUT_MS);
+      timeoutRef.current = window.setTimeout(logoutForSafety, timeoutMs);
     };
 
     const checkReturn = () => {
@@ -43,7 +56,7 @@ export function ResidentSessionSafety() {
       const awayMs = Date.now() - awaySinceRef.current;
       awaySinceRef.current = null;
       clearTimer();
-      if (awayMs >= RESIDENT_FOCUS_TIMEOUT_MS) logoutForSafety();
+      if (awayMs >= timeoutMs) logoutForSafety();
     };
 
     const handleVisibility = () => {

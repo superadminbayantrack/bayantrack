@@ -2465,7 +2465,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
               aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
-              <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl bg-slate-900 text-white shadow-sm">
+              <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl text-white shadow-sm">
                 <img src={dashboardLogo} alt="BayanTrack" className="h-full w-full object-cover" />
               </div>
               {!isSidebarCollapsed ? (

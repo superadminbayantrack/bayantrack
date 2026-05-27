@@ -192,7 +192,7 @@ Main functions:
 - Reset password with OTP
 - Lock account after failed login attempts
 - Store secure session through httpOnly cookie
-- Auto logout inactive resident sessions with a session-expired feedback message
+- Auto logout focus-away resident and child sessions after 2 minutes, and admin/superadmin sessions after 3 minutes, with a session-expired feedback message
 - Use a short login grace window so fresh logins do not get cleared by an early 401 while cookies settle
 
 Important backend routes:
@@ -748,8 +748,8 @@ Implemented:
 - Mongo payload sanitization
 - Input validation for email, phone, required fields, statuses
 - Child profile photo validation for allowed image data and size limit
-- Resident inactivity/focus-away logout with clear session-expired feedback
-- Child sessions are excluded from the focus-away auto logout so linked child access stays usable
+- Role-based inactivity/focus-away logout with clear session-expired feedback
+- Resident and linked child sessions time out after 2 minutes away from the site; admin and superadmin sessions time out after 3 minutes away
 - Fresh logins get a short grace period before auth 401 responses can force a logout redirect
 - Read-only auth refresh requests retry quietly so a temporary 401 does not force logout
 - Protected admin and superadmin routes
@@ -853,7 +853,7 @@ Manual flows to test before defense:
 - Announcement view and admin edit
 - Dashboard load
 - Notification clear
-- Resident inactivity/session-timeout feedback
+- Resident, child, admin, and superadmin inactivity/session-timeout feedback
 - Live emergency alert/chat if included in demo
 
 ## 12. Common Panel Questions and Short Answers
