@@ -23,19 +23,26 @@ export const DEFAULT_ADMIN_PERMISSIONS = {
   subscribers: { view: true, add: true, edit: true, archive: true, delete: true },
 } as const;
 
-function requireBootstrapSecret(name: string, fallback: string) {
-  const value = process.env[name] || fallback;
-  if (isProductionEnv() && value === fallback) {
-    throw new Error(`${name} must be set in production. Refusing to use a default bootstrap password.`);
+function getBootstrapSecret(name: string, fallback: string) {
+  const value = String(process.env[name] || "").trim();
+  if (!isProductionEnv()) return value || fallback;
+
+  if (!value || value === fallback) {
+    console.warn(`${name} is missing or uses the local default. Skipping this bootstrap account in production.`);
+    return null;
   }
+
   return value;
 }
 
 export function getBootstrapAccounts(): BootstrapAccount[] {
+  const adminPassword = getBootstrapSecret("BOOTSTRAP_ADMIN_PASSWORD", LOCAL_ADMIN_PASSWORD);
+  const superadminPassword = getBootstrapSecret("BOOTSTRAP_SUPERADMIN_PASSWORD", LOCAL_SUPERADMIN_PASSWORD);
+
   return [
     {
       username: process.env.BOOTSTRAP_ADMIN_USERNAME || "admin",
-      password: requireBootstrapSecret("BOOTSTRAP_ADMIN_PASSWORD", LOCAL_ADMIN_PASSWORD),
+      password: adminPassword,
       role: "admin",
       firstName: "Admin",
       lastName: "Bayan Track",
@@ -45,7 +52,7 @@ export function getBootstrapAccounts(): BootstrapAccount[] {
     },
     {
       username: process.env.BOOTSTRAP_SUPERADMIN_USERNAME || "superAdmin123",
-      password: requireBootstrapSecret("BOOTSTRAP_SUPERADMIN_PASSWORD", LOCAL_SUPERADMIN_PASSWORD),
+      password: superadminPassword,
       role: "superadmin",
       firstName: "Super",
       lastName: "Admin",
@@ -53,5 +60,5 @@ export function getBootstrapAccounts(): BootstrapAccount[] {
       contactNumber: process.env.BOOTSTRAP_SUPERADMIN_CONTACT || "00000000001",
       address: "City Hall",
     },
-  ];
+  ].filter((account): account is BootstrapAccount => Boolean(account.password));
 }
