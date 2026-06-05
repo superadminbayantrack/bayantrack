@@ -11,7 +11,7 @@ import { auth } from '../middleware/auth.js';
 import { AUTH_COOKIE_NAME, getAuthCookieOptions, getJwtSecret, isProductionEnv } from '../config/env.js';
 import { getAdminNotificationRecipients, logSystemEvent, sendUserMail } from '../utils/notifications.js';
 import { findEmbeddedAccount, getEmbeddedAccountById, isReservedEmbeddedIdentity } from '../config/embeddedAccounts.js';
-import { isValidEmail, isValidPhilippineMobile } from '../utils/validation.js';
+import { cleanText, isValidEmail, isValidPhilippineMobile, personNameError } from '../utils/validation.js';
 
 const router = express.Router();
 const AUTH_TOKEN_TTL = process.env.AUTH_TOKEN_TTL || '7d';
@@ -133,7 +133,7 @@ function normalizeChildren(children) {
   return children
     .map((child) => ({
       _id: child?._id,
-      fullName: String(child?.fullName || '').trim(),
+      fullName: cleanText(child?.fullName, { max: 140 }),
       email: String(child?.email || '').trim().toLowerCase(),
       birthDate: String(child?.birthDate || '').trim(),
       relationship: String(child?.relationship || 'Child').trim() || 'Child',
@@ -148,6 +148,13 @@ function normalizeChildren(children) {
 function validateChildren(children) {
   const emailSet = new Set();
   for (const child of children) {
+    const childNameError = personNameError(child.fullName, 'Child full name');
+    if (childNameError) {
+      return {
+        ok: false,
+        msg: childNameError,
+      };
+    }
     const age = getAgeFromBirthDate(child.birthDate);
     if (age === null) {
       return {
@@ -448,7 +455,7 @@ router.post('/send-otp', async (req, res) => {
 // @desc    Validate registration fields before sending OTP
 // @access  Public
 router.post('/register/check', async (req, res) => {
-  const { username, email, contactNumber, address, addressDetails } = req.body;
+  const { username, firstName, middleName, lastName, email, contactNumber, address, addressDetails } = req.body;
   try {
     const settings = await readSystemSettings();
     if (settings.maintenanceMode) {
@@ -468,6 +475,13 @@ router.post('/register/check', async (req, res) => {
     }
     if (!isValidPhilippineMobile(normalizedContactNumber)) {
       return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
+    }
+    const registrationNameError =
+      personNameError(firstName, 'First name') ||
+      personNameError(middleName, 'Middle name', { required: false }) ||
+      personNameError(lastName, 'Last name');
+    if (registrationNameError) {
+      return res.status(400).json({ msg: registrationNameError });
     }
     if (isReservedEmbeddedIdentity({ username, email: normalizedEmail, contactNumber: normalizedContactNumber })) {
       return res.status(400).json({ msg: 'These login details are reserved for barangay staff. Please use different resident details.' });
@@ -549,6 +563,13 @@ router.post('/register', async (req, res) => {
     if (!isStrongPassword(password)) {
       return res.status(400).json({ msg: 'Password must be at least 8 characters and include uppercase, lowercase, and 1 special character.' });
     }
+    const registrationNameError =
+      personNameError(firstName, 'First name') ||
+      personNameError(middleName, 'Middle name', { required: false }) ||
+      personNameError(lastName, 'Last name');
+    if (registrationNameError) {
+      return res.status(400).json({ msg: registrationNameError });
+    }
 
     let user = await User.findOne({ $or: [{ email: normalizedEmail }, { username }, { contactNumber: normalizedContactNumber }] });
     if (user) {
@@ -583,9 +604,9 @@ router.post('/register', async (req, res) => {
 
     user = new User({
       username,
-      firstName,
-      middleName,
-      lastName,
+      firstName: cleanText(firstName, { max: 80 }),
+      middleName: cleanText(middleName, { max: 80 }),
+      lastName: cleanText(lastName, { max: 80 }),
       address: mergedAddress,
       addressDetails: normalizedAddress,
       contactNumber: normalizedContactNumber,
@@ -858,9 +879,9 @@ router.put('/user', auth, async (req, res) => {
   const userFields = {};
   const normalizedProfileContactNumber = contactNumber ? normalizePhilippineMobile(contactNumber) : '';
   if (username) userFields.username = username;
-  if (firstName) userFields.firstName = firstName;
-  if (middleName) userFields.middleName = middleName;
-  if (lastName) userFields.lastName = lastName;
+  if (firstName) userFields.firstName = cleanText(firstName, { max: 80 });
+  if (middleName) userFields.middleName = cleanText(middleName, { max: 80 });
+  if (lastName) userFields.lastName = cleanText(lastName, { max: 80 });
   if (address) userFields.address = address;
   if (addressDetails) {
     userFields.addressDetails = normalizeAddressDetails(addressDetails);
@@ -881,6 +902,14 @@ router.put('/user', auth, async (req, res) => {
     let user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ msg: 'User not found' });
     const isEmailChange = Boolean(normalizedProfileEmail && normalizedProfileEmail !== String(user.email || '').toLowerCase());
+
+    const profileNameError =
+      (firstName !== undefined ? personNameError(firstName, 'First name') : '') ||
+      (middleName !== undefined ? personNameError(middleName, 'Middle name', { required: false }) : '') ||
+      (lastName !== undefined ? personNameError(lastName, 'Last name') : '');
+    if (profileNameError) {
+      return res.status(400).json({ msg: profileNameError });
+    }
 
     if (isEmailChange) {
       const emailExists = await User.findOne({ email: normalizedProfileEmail, _id: { $ne: req.user.id } });
@@ -1279,6 +1308,10 @@ router.post('/child-session/request-otp', auth, async (req, res) => {
     if (!nextFullName || !nextEmail) {
       return res.status(400).json({ msg: 'Child name and email are required.' });
     }
+    const childNameError = personNameError(nextFullName, 'Child name');
+    if (childNameError) {
+      return res.status(400).json({ msg: childNameError });
+    }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
       return res.status(400).json({ msg: 'Enter a valid child email address.' });
     }
@@ -1361,6 +1394,10 @@ router.put('/child-session/update', auth, async (req, res) => {
 
     if (!nextFullName || !nextEmail) {
       return res.status(400).json({ msg: 'Child name and email are required.' });
+    }
+    const childNameError = personNameError(nextFullName, 'Child name');
+    if (childNameError) {
+      return res.status(400).json({ msg: childNameError });
     }
     if (!otp) {
       return res.status(400).json({ msg: 'OTP is required.' });

@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { Reveal } from "@/components/Reveal";
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { MAMBOG_II_SUBDIVISIONS } from "@/lib/mambogSubdivisions";
+import { cleanPersonNameInput, isValidPersonName, personNameMessage } from "@/lib/validation";
 
 type Activity = {
   _id: string;
@@ -294,6 +295,10 @@ export default function ProfileSettings() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+    if (["firstName", "middleName", "lastName"].includes(name)) {
+      setFormData((prev) => ({ ...prev, [name]: cleanPersonNameInput(value, 80) }));
+      return;
+    }
     if (name === "contactNumber") {
       setFormData((prev) => ({ ...prev, contactNumber: digitOnly(value) }));
       return;
@@ -318,7 +323,11 @@ export default function ProfileSettings() {
   };
 
   const handleChildChange = (index: number, field: keyof ChildLink, value: string) => {
-    const nextValue = field === "email" ? value.trim().toLowerCase() : value;
+    const nextValue = field === "email"
+      ? value.trim().toLowerCase()
+      : field === "fullName"
+        ? cleanPersonNameInput(value)
+        : value;
     setChildren((prev) => prev.map((child, childIndex) => (
       childIndex === index ? { ...child, [field]: nextValue } : child
     )));
@@ -337,6 +346,10 @@ export default function ProfileSettings() {
     const child = children[index];
     if (!child?.fullName || !child?.email || !child?.birthDate) {
       setFeedback({ isOpen: true, title: "Incomplete Child Info", message: "Enter the child's full name, email, and birth date before sending OTP.", type: "error" });
+      return;
+    }
+    if (!isValidPersonName(child.fullName)) {
+      setFeedback({ isOpen: true, title: "Invalid Child Name", message: personNameMessage("Child full name"), type: "error" });
       return;
     }
     if (!emailPattern.test(child.email.trim().toLowerCase())) {
@@ -392,6 +405,23 @@ export default function ProfileSettings() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isValidPersonName(formData.firstName)) {
+      setFeedback({ isOpen: true, title: "Invalid Name", message: personNameMessage("First name"), type: "error" });
+      return;
+    }
+    if (!isValidPersonName(formData.middleName, { required: false })) {
+      setFeedback({ isOpen: true, title: "Invalid Name", message: personNameMessage("Middle name"), type: "error" });
+      return;
+    }
+    if (!isValidPersonName(formData.lastName)) {
+      setFeedback({ isOpen: true, title: "Invalid Name", message: personNameMessage("Last name"), type: "error" });
+      return;
+    }
+    const invalidChild = children.find((child) => child.fullName && !isValidPersonName(child.fullName));
+    if (invalidChild) {
+      setFeedback({ isOpen: true, title: "Invalid Child Name", message: personNameMessage("Child full name"), type: "error" });
+      return;
+    }
     if (!/^09\d{9}$/.test(formData.contactNumber)) {
       setFeedback({ isOpen: true, title: "Invalid Contact", message: "Phone number must be 11 digits and start with 09.", type: "error" });
       return;
@@ -609,6 +639,10 @@ export default function ProfileSettings() {
       setFeedback({ isOpen: true, title: "Incomplete Details", message: "Child name and email are required.", type: "error" });
       return;
     }
+    if (!isValidPersonName(childSessionForm.fullName)) {
+      setFeedback({ isOpen: true, title: "Invalid Child Name", message: personNameMessage("Child name"), type: "error" });
+      return;
+    }
     const normalizedChildEmail = childSessionForm.email.trim().toLowerCase();
     if (!emailPattern.test(normalizedChildEmail)) {
       setFeedback({ isOpen: true, title: "Invalid Child Email", message: "Enter a valid child email address before requesting OTP.", type: "error" });
@@ -626,13 +660,22 @@ export default function ProfileSettings() {
   };
 
   const handleChildSessionUpdate = async () => {
+    if (!isValidPersonName(childSessionForm.fullName)) {
+      setFeedback({ isOpen: true, title: "Invalid Child Name", message: personNameMessage("Child name"), type: "error" });
+      return;
+    }
+    const normalizedChildEmail = childSessionForm.email.trim().toLowerCase();
+    if (!emailPattern.test(normalizedChildEmail)) {
+      setFeedback({ isOpen: true, title: "Invalid Child Email", message: "Enter a valid child email address before saving.", type: "error" });
+      return;
+    }
     if (!childSessionOtpModal.otp || childSessionOtpModal.otp.length < 6) {
       setFeedback({ isOpen: true, title: "OTP Required", message: "Enter the 6-digit OTP sent to the parent email.", type: "error" });
       return;
     }
     setChildSessionOtpModal((prev) => ({ ...prev, verifying: true }));
     try {
-      const res = await api.put("/api/auth/child-session/update", { ...childSessionForm, email: childSessionForm.email.trim().toLowerCase(), otp: childSessionOtpModal.otp }, { headers: authHeaders() });
+      const res = await api.put("/api/auth/child-session/update", { ...childSessionForm, email: normalizedChildEmail, otp: childSessionOtpModal.otp }, { headers: authHeaders() });
       setActingChild(res.data?.actingChild || actingChild);
       setChildren(Array.isArray(res.data?.children) ? res.data.children : children);
       setAuthSession(undefined, "resident", {
@@ -737,7 +780,7 @@ export default function ProfileSettings() {
                           <input
                             className="w-full rounded-md border border-gray-300 p-2.5 text-sm text-gray-700"
                             value={childSessionForm.fullName}
-                            onChange={(e) => setChildSessionForm((prev) => ({ ...prev, fullName: e.target.value }))}
+                            onChange={(e) => setChildSessionForm((prev) => ({ ...prev, fullName: cleanPersonNameInput(e.target.value) }))}
                           />
                         </div>
                         <div className="space-y-1.5">

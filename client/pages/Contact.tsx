@@ -6,6 +6,7 @@ import { Footer } from "@/components/Footer";
 import { Reveal } from "@/components/Reveal";
 import { api, authHeaders } from '@/lib/api';
 import { FeedbackModal } from "@/components/FeedbackModal";
+import { cleanPersonNameInput, isValidPersonName, personNameMessage } from "@/lib/validation";
 
 const SuccessModal = ({ referenceNo, onClose }: { referenceNo: string; onClose: () => void }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -82,6 +83,7 @@ export default function Contact() {
   const validate = () => {
     const nextErrors: Record<string, string> = {};
     if (!form.name.trim()) nextErrors.name = 'Name is required.';
+    else if (!isValidPersonName(form.name)) nextErrors.name = personNameMessage('Name');
     if (!form.contact.trim()) nextErrors.contact = 'Contact is required.';
     else if (!isValidContact(form.contact)) nextErrors.contact = 'Use a valid email address or an 11-digit number that starts with 09.';
     if (!form.department.trim()) nextErrors.department = 'Department is required.';
@@ -182,7 +184,7 @@ export default function Contact() {
                 <form className="space-y-4" onSubmit={handleSubmit}>
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-600">Your Name</label>
-                    <input className="w-full rounded-lg border px-3 py-2" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
+                    <input className="w-full rounded-lg border px-3 py-2" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: cleanPersonNameInput(e.target.value) }))} />
                     {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name}</p>}
                   </div>
                   <div>

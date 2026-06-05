@@ -7,6 +7,7 @@ import { ArrowRight, CheckCircle, Clock, FileText, History, Search, X } from "lu
 import { api, authHeaders } from "@/lib/api";
 import { hasAuthSession } from "@/lib/auth";
 import { FeedbackModal } from "@/components/FeedbackModal";
+import { cleanPersonNameInput, isValidPersonName, personNameMessage } from "@/lib/validation";
 
 type ServiceCatalog = {
   code: string;
@@ -158,6 +159,10 @@ export default function Services() {
     if (!activeCode) return;
     if (!hasAuthSession()) {
       setFeedback({ isOpen: true, title: "Login Required", message: "Please log in as a resident before submitting a service request.", type: "error" });
+      return;
+    }
+    if (!isValidPersonName(formData.fullName)) {
+      setFeedback({ isOpen: true, title: "Invalid Name", message: personNameMessage("Full name"), type: "error" });
       return;
     }
     if (!/^09\d{9}$/.test(formData.contactNumber)) {
@@ -361,7 +366,7 @@ export default function Services() {
                 <p className="mt-1 text-sm text-slate-600">{activeService.desc}</p>
                 {isSubmitting && <div className="mt-3"><p className="mb-1 text-xs text-slate-500">Submitting request... {submitProgress}%</p><div className="h-2 rounded bg-slate-200"><div className="h-2 rounded bg-emerald-600 transition-all" style={{ width: `${submitProgress}%` }} /></div></div>}
                 <form className="mt-6 space-y-3" onSubmit={submitRequest}>
-                  <input required className="w-full rounded-lg border px-3 py-2" placeholder="Full Name" value={formData.fullName} onChange={(e) => setFormData((p) => ({ ...p, fullName: e.target.value }))} />
+                  <input required className="w-full rounded-lg border px-3 py-2" placeholder="Full Name" value={formData.fullName} onChange={(e) => setFormData((p) => ({ ...p, fullName: cleanPersonNameInput(e.target.value) }))} />
                   <input required className="w-full rounded-lg border px-3 py-2" placeholder="09XXXXXXXXX" type="tel" inputMode="numeric" pattern="09[0-9]{9}" maxLength={11} value={formData.contactNumber} onChange={(e) => setFormData((p) => ({ ...p, contactNumber: e.target.value.replace(/\D/g, "").slice(0, 11) }))} />
                   <input required className="w-full rounded-lg border px-3 py-2" placeholder="Address" value={formData.address} onChange={(e) => setFormData((p) => ({ ...p, address: e.target.value }))} />
                   <select required className="w-full rounded-lg border px-3 py-2" value={formData.purpose} onChange={(e) => setFormData((p) => ({ ...p, purpose: e.target.value }))}>

@@ -1,5 +1,6 @@
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const PH_PHONE_PATTERN = /^09\d{9}$/;
+export const PERSON_NAME_PATTERN = /^[\p{L}\p{M}][\p{L}\p{M} .'-]*$/u;
 
 export function cleanText(value, { max = 500, fallback = '' } = {}) {
   return String(value ?? fallback).replace(/\s+/g, ' ').trim().slice(0, max);
@@ -16,6 +17,23 @@ export function isValidPhilippineMobile(value) {
 export function isValidContact(value) {
   const cleaned = cleanText(value, { max: 254 });
   return isValidEmail(cleaned) || isValidPhilippineMobile(cleaned);
+}
+
+export function isValidPersonName(value, { required = true } = {}) {
+  const cleaned = cleanText(value, { max: 140 });
+  if (!cleaned) return !required;
+  const letterCount = (cleaned.match(/\p{L}/gu) || []).length;
+  return letterCount >= 2 && PERSON_NAME_PATTERN.test(cleaned);
+}
+
+export function personNameError(value, label = 'Name', { required = true } = {}) {
+  const cleaned = cleanText(value, { max: 140 });
+  if (!cleaned && required) return `${label} is required.`;
+  if (!cleaned && !required) return '';
+  if (!isValidPersonName(cleaned, { required })) {
+    return `${label} must contain letters only. Numbers and special symbols are not allowed.`;
+  }
+  return '';
 }
 
 export function requireTextFields(source, fields) {

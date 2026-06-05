@@ -5,7 +5,7 @@ import ContactMessage from '../models/ContactMessage.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
 import { getAdminNotificationRecipients, logSystemEvent, publicHandlerLabel, resolveHandledByDetails, sendUserMail } from '../utils/notifications.js';
-import { cleanText, isValidContact, isValidEmail, requireTextFields } from '../utils/validation.js';
+import { cleanText, isValidContact, isValidEmail, personNameError, requireTextFields } from '../utils/validation.js';
 import { paginatedPayload, parsePagination } from '../utils/pagination.js';
 
 const router = express.Router();
@@ -83,6 +83,10 @@ router.post('/departments', auth, requireRoles('superadmin'), async (req, res) =
   try {
     const name = cleanText(req.body.name, { max: 120 });
     if (!name) return res.status(400).json({ msg: 'Department name is required.' });
+    const contactPersonError = personNameError(req.body.contactPerson, 'Contact person');
+    if (contactPersonError) {
+      return res.status(400).json({ msg: contactPersonError });
+    }
     if (req.body.email && !isValidEmail(req.body.email)) {
       return res.status(400).json({ msg: 'Department email must be valid.' });
     }
@@ -109,7 +113,24 @@ router.post('/departments', auth, requireRoles('superadmin'), async (req, res) =
 
 router.put('/departments/:id', auth, requireRoles('superadmin'), async (req, res) => {
   try {
-    const updated = await Department.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after' });
+    const update = {
+      ...req.body,
+      ...(req.body.name !== undefined ? { name: cleanText(req.body.name, { max: 120 }) } : {}),
+      ...(req.body.email !== undefined ? { email: cleanText(req.body.email, { max: 254 }) } : {}),
+      ...(req.body.phone !== undefined ? { phone: cleanText(req.body.phone, { max: 40 }) } : {}),
+      ...(req.body.localNumber !== undefined ? { localNumber: cleanText(req.body.localNumber, { max: 30 }) } : {}),
+      ...(req.body.contactPerson !== undefined ? { contactPerson: cleanText(req.body.contactPerson, { max: 120 }) } : {}),
+    };
+    if (update.contactPerson !== undefined) {
+      const contactPersonError = personNameError(update.contactPerson, 'Contact person');
+      if (contactPersonError) {
+        return res.status(400).json({ msg: contactPersonError });
+      }
+    }
+    if (update.email && !isValidEmail(update.email)) {
+      return res.status(400).json({ msg: 'Department email must be valid.' });
+    }
+    const updated = await Department.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
     if (!updated) {
       return res.status(404).json({ msg: 'Department not found' });
     }
@@ -149,6 +170,10 @@ router.post('/messages', optionalAuth, async (req, res) => {
   try {
     const missing = requireTextFields(req.body, ['name', 'contact', 'department', 'message']);
     if (missing) return res.status(400).json({ msg: missing });
+    const nameError = personNameError(req.body.name, 'Name');
+    if (nameError) {
+      return res.status(400).json({ msg: nameError });
+    }
     if (!isValidContact(req.body.contact)) {
       return res.status(400).json({ msg: 'Contact must be a valid email address or 09XXXXXXXXX mobile number.' });
     }
@@ -261,6 +286,12 @@ router.put('/messages/:id', auth, requireRoles('admin', 'superadmin'), requireAd
     ['name', 'contact', 'department', 'message', 'status', 'adminComment'].forEach((key) => {
       if (req.body[key] !== undefined) update[key] = typeof req.body[key] === 'string' ? cleanText(req.body[key], { max: key === 'message' ? 2000 : 500 }) : req.body[key];
     });
+    if (update.name !== undefined) {
+      const nameError = personNameError(update.name, 'Name');
+      if (nameError) {
+        return res.status(400).json({ msg: nameError });
+      }
+    }
     if (update.contact && !isValidContact(update.contact)) {
       return res.status(400).json({ msg: 'Contact must be a valid email address or 09XXXXXXXXX mobile number.' });
     }

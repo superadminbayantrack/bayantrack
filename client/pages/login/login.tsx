@@ -6,6 +6,7 @@ import { FeedbackModal } from "@/components/FeedbackModal";
 import { clearAuthSession, getRoleHome, normalizeRole, setAuthSession } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { MAMBOG_II_SUBDIVISIONS } from "@/lib/mambogSubdivisions";
+import { cleanPersonNameInput, isValidPersonName, personNameMessage } from "@/lib/validation";
 import brandLogo from "../../../assets/brandlogo/brand_logo.png";
 
 type ViewState = "login" | "forgot" | "create" | "reset";
@@ -163,6 +164,10 @@ const Login = () => {
 
   const handleRegisterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
+    if (["firstName", "middleName", "lastName"].includes(name)) {
+      setRegisterData({ ...registerData, [name]: cleanPersonNameInput(value, 80) });
+      return;
+    }
     if (name === "contactNumber") {
       setRegisterData({ ...registerData, contactNumber: digitOnly(value) });
       return;
@@ -237,6 +242,13 @@ const Login = () => {
     setTimeout(() => setOtpLoading({ active: false, title: "", progress: 0 }), 350);
   };
 
+  const registrationNameError = () => {
+    if (!isValidPersonName(registerData.firstName)) return personNameMessage("First name");
+    if (!isValidPersonName(registerData.middleName, { required: false })) return personNameMessage("Middle name");
+    if (!isValidPersonName(registerData.lastName)) return personNameMessage("Last name");
+    return "";
+  };
+
   const handleAction = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -280,6 +292,11 @@ const Login = () => {
         setFeedback({ isOpen: true, title: "Weak Password", message: "Password must be at least 8 characters with uppercase, lowercase, and 1 special character.", type: "error" });
         return;
       }
+      const nameError = registrationNameError();
+      if (nameError) {
+        setFeedback({ isOpen: true, title: "Invalid Name", message: nameError, type: "error" });
+        return;
+      }
       if (!/^09\d{9}$/.test(registerData.contactNumber)) {
         setFeedback({ isOpen: true, title: "Invalid Contact", message: "Phone number must be 11 digits and start with 09.", type: "error" });
         return;
@@ -318,6 +335,9 @@ const Login = () => {
         const address = formatResidentAddress(addressDetails);
         await api.post("/api/auth/register/check", {
           username: registerData.username,
+          firstName: registerData.firstName,
+          middleName: registerData.middleName,
+          lastName: registerData.lastName,
           email: registerData.email,
           contactNumber: registerData.contactNumber,
           address,
@@ -374,6 +394,11 @@ const Login = () => {
     const passwordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}$/;
     if (!passwordPattern.test(registerData.password)) {
       setFeedback({ isOpen: true, title: "Weak Password", message: "Password must be at least 8 characters with uppercase, lowercase, and 1 special character.", type: "error" });
+      return;
+    }
+    const nameError = registrationNameError();
+    if (nameError) {
+      setFeedback({ isOpen: true, title: "Invalid Name", message: nameError, type: "error" });
       return;
     }
     if (!/^09\d{9}$/.test(registerData.contactNumber) || !emailPattern.test(registerData.email) || !registerData.street.trim() || !registerData.subdivision.trim()) {

@@ -6,6 +6,7 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { api, authHeaders } from '@/lib/api';
 import { FeedbackModal } from "@/components/FeedbackModal";
+import { cleanPersonNameInput, isValidPersonName, personNameMessage } from "@/lib/validation";
 
 const PHONE_PATTERN = /^09\d{9}$/;
 
@@ -42,7 +43,11 @@ export default function ReportIssue() {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: name === "contactNumber" ? value.replace(/\D/g, "").slice(0, 11) : value,
+      [name]: name === "contactNumber"
+        ? value.replace(/\D/g, "").slice(0, 11)
+        : name === "fullName"
+          ? cleanPersonNameInput(value)
+          : value,
     }));
   };
 
@@ -71,6 +76,10 @@ export default function ReportIssue() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isValidPersonName(formData.fullName)) {
+      setFeedback({ isOpen: true, title: "Invalid Name", message: personNameMessage("Full name"), type: "error" });
+      return;
+    }
     if (!PHONE_PATTERN.test(formData.contactNumber)) {
       setFeedback({ isOpen: true, title: "Invalid Contact", message: "Phone number must be 11 digits and start with 09.", type: "error" });
       return;

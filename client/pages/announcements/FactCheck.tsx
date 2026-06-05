@@ -9,6 +9,7 @@ import { hasAuthSession } from '@/lib/auth';
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { EmergencySafetyRouteCard } from "@/components/EmergencySafetyRouteCard";
 import { AnnouncementDetailModal, type AnnouncementDetailItem } from "@/components/AnnouncementDetailModal";
+import { cleanPersonNameInput, isValidPersonName, personNameMessage } from "@/lib/validation";
 
 type Announcement = AnnouncementDetailItem & {
   _id: string;
@@ -124,6 +125,10 @@ export default function FactCheck() {
       setFeedback({ isOpen: true, title: 'Missing Details', message: 'Please complete your name, contact number, address, and the rumor details.', type: 'error' });
       return;
     }
+    if (!isValidPersonName(reporter.fullName)) {
+      setFeedback({ isOpen: true, title: 'Invalid Name', message: personNameMessage('Full name'), type: 'error' });
+      return;
+    }
     if (!PHONE_PATTERN.test(reporter.contactNumber.trim())) {
       setFeedback({ isOpen: true, title: 'Invalid Contact', message: 'Phone number must be 11 digits and start with 09.', type: 'error' });
       return;
@@ -208,7 +213,7 @@ export default function FactCheck() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredData.map((item) => (
-            <Reveal>
+            <Reveal key={item._id}>
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col h-full hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
@@ -259,7 +264,7 @@ export default function FactCheck() {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Full Name</label>
-                    <input required type="text" value={reporter.fullName} onChange={(e) => setReporter((p) => ({ ...p, fullName: e.target.value }))} placeholder="Your full name" className="w-full p-4 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#638ECB] text-sm" />
+                    <input required type="text" value={reporter.fullName} onChange={(e) => setReporter((p) => ({ ...p, fullName: cleanPersonNameInput(e.target.value) }))} placeholder="Your full name" className="w-full p-4 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#638ECB] text-sm" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">Contact Number</label>

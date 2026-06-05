@@ -16,7 +16,7 @@ import NotificationState from '../models/NotificationState.js';
 import { auth, requireRoles } from '../middleware/auth.js';
 import { logSystemEvent, sendUserMail } from '../utils/notifications.js';
 import { isReservedEmbeddedIdentity } from '../config/embeddedAccounts.js';
-import { cleanText, isValidEmail, isValidPhilippineMobile } from '../utils/validation.js';
+import { cleanText, isValidEmail, isValidPhilippineMobile, personNameError } from '../utils/validation.js';
 import { paginatedPayload, parsePagination } from '../utils/pagination.js';
 
 const router = express.Router();
@@ -162,6 +162,29 @@ function buildUserFields(body, { includePassword = false } = {}) {
     if (body.role === 'admin') fields.adminPermissions = DEFAULT_ADMIN_PERMISSIONS;
   }
   if (includePassword && body.password) fields.password = body.password;
+  return fields;
+}
+
+function validateUserNameFields(fields = {}, { requireFirstLast = false } = {}) {
+  if (requireFirstLast || fields.firstName !== undefined) {
+    const firstNameError = personNameError(fields.firstName, 'First name');
+    if (firstNameError) return firstNameError;
+  }
+  if (fields.middleName !== undefined) {
+    const middleNameError = personNameError(fields.middleName, 'Middle name', { required: false });
+    if (middleNameError) return middleNameError;
+  }
+  if (requireFirstLast || fields.lastName !== undefined) {
+    const lastNameError = personNameError(fields.lastName, 'Last name');
+    if (lastNameError) return lastNameError;
+  }
+  return '';
+}
+
+function cleanUserNameFields(fields = {}) {
+  ['firstName', 'middleName', 'lastName'].forEach((key) => {
+    if (fields[key] !== undefined) fields[key] = cleanText(fields[key], { max: 80 });
+  });
   return fields;
 }
 
@@ -338,6 +361,10 @@ router.post('/users', auth, requireRoles('superadmin'), async (req, res) => {
     if (!isValidPhilippineMobile(req.body.contactNumber)) {
       return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
     }
+    const nameError = validateUserNameFields(req.body, { requireFirstLast: true });
+    if (nameError) {
+      return res.status(400).json({ msg: nameError });
+    }
 
     const duplicate = await User.findOne({
       $or: [
@@ -350,7 +377,7 @@ router.post('/users', auth, requireRoles('superadmin'), async (req, res) => {
       return res.status(400).json({ msg: 'Username, email, or contact number already exists.' });
     }
 
-    const fields = buildUserFields({
+    const fields = cleanUserNameFields(buildUserFields({
       ...req.body,
       username: cleanText(req.body.username, { max: 80 }),
       firstName: cleanText(req.body.firstName, { max: 80 }),
@@ -358,7 +385,7 @@ router.post('/users', auth, requireRoles('superadmin'), async (req, res) => {
       lastName: cleanText(req.body.lastName, { max: 80 }),
       email: cleanText(req.body.email, { max: 254 }).toLowerCase(),
       contactNumber: cleanText(req.body.contactNumber, { max: 20 }),
-    }, { includePassword: true });
+    }, { includePassword: true }));
     fields.email = String(fields.email || '').toLowerCase().trim();
     fields.address = fields.address || composeUserAddress(fields.addressDetails, 'Mambog II, Bacoor, Cavite 4102');
     fields.status = fields.status || 'active';
@@ -397,7 +424,11 @@ router.put('/users/:id', auth, requireRoles('superadmin'), async (req, res) => {
       return res.status(400).json({ msg: 'Protected superadmin role cannot be changed.' });
     }
 
-    const fields = buildUserFields(req.body, { includePassword: Boolean(req.body.password) });
+    const fields = cleanUserNameFields(buildUserFields(req.body, { includePassword: Boolean(req.body.password) }));
+    const nameError = validateUserNameFields(fields);
+    if (nameError) {
+      return res.status(400).json({ msg: nameError });
+    }
     if (fields.email) fields.email = String(fields.email).toLowerCase().trim();
     if (fields.email && !isValidEmail(fields.email)) {
       return res.status(400).json({ msg: 'Valid email address is required.' });

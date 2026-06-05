@@ -8,7 +8,7 @@ import User from '../models/User.js';
 import { auth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
 import { getAdminNotificationRecipients, logSystemEvent, publicHandlerLabel, resolveHandledByDetails, sendUserMail } from '../utils/notifications.js';
-import { cleanText, isValidPhilippineMobile, requireTextFields } from '../utils/validation.js';
+import { cleanText, isValidPhilippineMobile, personNameError, requireTextFields } from '../utils/validation.js';
 import { paginatedPayload, parsePagination } from '../utils/pagination.js';
 
 const router = express.Router();
@@ -274,6 +274,10 @@ router.post('/requests', auth, async (req, res) => {
   try {
     const missing = requireTextFields(req.body, ['serviceType', 'fullName', 'contactNumber', 'address', 'purpose']);
     if (missing) return res.status(400).json({ msg: missing });
+    const fullNameError = personNameError(req.body.fullName, 'Full name');
+    if (fullNameError) {
+      return res.status(400).json({ msg: fullNameError });
+    }
     if (!isValidPhilippineMobile(req.body.contactNumber)) {
       return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
     }
@@ -454,6 +458,12 @@ router.put('/requests/:id', auth, requireRoles('admin', 'superadmin'), requireAd
     ['serviceType', 'fullName', 'contactNumber', 'address', 'purpose', 'status', 'adminComment'].forEach((key) => {
       if (req.body[key] !== undefined) update[key] = typeof req.body[key] === 'string' ? cleanText(req.body[key], { max: key === 'purpose' ? 1500 : 500 }) : req.body[key];
     });
+    if (update.fullName !== undefined) {
+      const fullNameError = personNameError(update.fullName, 'Full name');
+      if (fullNameError) {
+        return res.status(400).json({ msg: fullNameError });
+      }
+    }
     if (update.contactNumber && !isValidPhilippineMobile(update.contactNumber)) {
       return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
     }

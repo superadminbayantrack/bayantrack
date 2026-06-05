@@ -6,7 +6,7 @@ import SystemSetting from '../models/SystemSetting.js';
 import { auth, optionalAuth, requireAdminPermission, requireRoles } from '../middleware/auth.js';
 import { makeReference } from '../utils/reference.js';
 import { getAdminNotificationRecipients, logSystemEvent, publicHandlerLabel, resolveHandledByDetails, sendUserMail } from '../utils/notifications.js';
-import { cleanText, isValidPhilippineMobile, requireTextFields } from '../utils/validation.js';
+import { cleanText, isValidPhilippineMobile, personNameError, requireTextFields } from '../utils/validation.js';
 import { paginatedPayload, parsePagination } from '../utils/pagination.js';
 
 const router = express.Router();
@@ -110,6 +110,10 @@ router.post('/', optionalAuth, async (req, res) => {
   try {
     const missing = requireTextFields(req.body, ['fullName', 'contactNumber', 'address', 'category', 'description']);
     if (missing) return res.status(400).json({ msg: missing });
+    const fullNameError = personNameError(req.body.fullName, 'Full name');
+    if (fullNameError) {
+      return res.status(400).json({ msg: fullNameError });
+    }
     if (!isValidPhilippineMobile(req.body.contactNumber)) {
       return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
     }
@@ -203,6 +207,12 @@ router.put('/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermis
     ['fullName', 'contactNumber', 'address', 'category', 'description', 'adminComment'].forEach((key) => {
       if (req.body[key] !== undefined) update[key] = cleanText(req.body[key], { max: key === 'description' ? 3000 : 500 });
     });
+    if (update.fullName !== undefined) {
+      const fullNameError = personNameError(update.fullName, 'Full name');
+      if (fullNameError) {
+        return res.status(400).json({ msg: fullNameError });
+      }
+    }
     if (update.contactNumber && !isValidPhilippineMobile(update.contactNumber)) {
       return res.status(400).json({ msg: 'Contact number must be exactly 11 digits and start with 09.' });
     }
