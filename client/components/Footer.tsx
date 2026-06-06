@@ -50,7 +50,7 @@ export function Footer() {
           <div className="flex flex-col">
             <h4 className="font-bold text-lg mb-10">Quick Links</h4>
             <nav className="flex flex-col gap-6">
-              <Link to="/" className="text-white/60 hover:text-white transition-colors font-medium">Home</Link>
+              <Link to="#" className="text-white/60 hover:text-white transition-colors font-medium">Home</Link>
               <Link to="/about" className="text-white/60 hover:text-white transition-colors font-medium">About Us</Link>
               <Link to="/services" className="text-white/60 hover:text-white transition-colors font-medium">Online Services</Link>
               <Link to="/announcements" className="text-white/60 hover:text-white transition-colors font-medium">Announcements</Link>
