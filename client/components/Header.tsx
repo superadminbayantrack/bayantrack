@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { LogoutConfirmation } from '@/components/LogoutConfirmation';
+import { AccessibilityControls } from "@/components/AccessibilityControls";
 
 import { Button } from "@/components/ui/button";
 import { User, ChevronDown, Menu, Bell, CheckCircle2, Trash2, X } from "lucide-react";
@@ -155,6 +156,9 @@ export function Header() {
 
   return (
     <>
+    <a href="#root" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[80] focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-bold focus:text-primary focus:shadow-lg">
+      Skip to main content
+    </a>
     <header className="fixed top-0 z-50 w-full border-b border-gray-100 bg-white shadow-sm">
       <div className="container mx-auto flex h-16 items-center justify-between px-3 sm:h-20 sm:px-4">
 
@@ -409,6 +413,7 @@ export function Header() {
         onConfirm={confirmLogout}
       />
     </header>
+    <AccessibilityControls />
     <div className="h-16 sm:h-20" />
     </>
   );

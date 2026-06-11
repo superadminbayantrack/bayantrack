@@ -40,13 +40,68 @@ const SERVICE_CATALOG = [
   },
   {
     code: 'residency-certificate',
-    title: 'Residency Certificate',
+    title: 'Certificate of Residency',
     desc: 'Proof that the requester is a resident of Barangay Mambog II.',
     usage: 'School, employment, local verification',
     requirements: ['Valid ID', 'Proof of current address'],
     time: '15 Mins',
   },
 ];
+
+const DOCUMENT_SERVICE_CODES = ['barangay-clearance', 'certificate-of-indigency', 'barangay-id', 'residency-certificate'];
+const SERVICE_STATUSES = ['pending', 'in-review', 'approved', 'for-pickup', 'released', 'rejected', 'cancelled', 'completed'];
+const MAX_SERVICE_ATTACHMENT_DATA_URL_LENGTH = 3_500_000;
+
+function normalizeServiceCode(value) {
+  const code = cleanText(value, { max: 120 }).toLowerCase();
+  return code === 'certificate-of-residency' ? 'residency-certificate' : code;
+}
+
+function getManilaDayRange(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const year = parts.find((item) => item.type === 'year')?.value;
+  const month = parts.find((item) => item.type === 'month')?.value;
+  const day = parts.find((item) => item.type === 'day')?.value;
+  const start = new Date(`${year}-${month}-${day}T00:00:00.000+08:00`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+function normalizeServiceRequirements(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, 5)
+    .map((item, index) => ({
+      label: cleanText(item?.label || `Requirement ${index + 1}`, { max: 80 }),
+      name: String(item?.name || '').slice(0, 160),
+      type: String(item?.type || '').slice(0, 80),
+      size: Number(item?.size) || 0,
+      dataUrl: String(item?.dataUrl || ''),
+    }))
+    .filter((item) => (
+      (item.dataUrl.startsWith('data:image/') || item.dataUrl.startsWith('data:application/pdf')) &&
+      item.dataUrl.length <= MAX_SERVICE_ATTACHMENT_DATA_URL_LENGTH
+    ));
+}
+
+function makeIssuedDocument(actor, existing = {}) {
+  if (existing?.referenceNo && existing?.releasedAt) return existing;
+  const referenceNo = existing?.referenceNo || makeReference('DOC');
+  return {
+    ...existing,
+    referenceNo,
+    verificationCode: existing?.verificationCode || referenceNo.replace(/[^A-Z0-9]/gi, '').slice(-10).toUpperCase(),
+    releasedAt: existing?.releasedAt || new Date(),
+    releasedByUser: mongoose.Types.ObjectId.isValid(actor.id) ? actor.id : null,
+    releasedByName: actor.name || '',
+    releasedByRole: actor.role || '',
+  };
+}
 
 const EMERGENCY_HOTLINES = [
   {
@@ -163,12 +218,16 @@ async function notifyServiceRequestStatus({ item, residentUser, actor, actorRole
     `<strong>Reference:</strong> ${item.referenceNo}`,
     `<strong>Service:</strong> ${item.serviceType}`,
     `<strong>Updated status:</strong> ${item.status}`,
+    item.issuedDocument?.referenceNo ? `<strong>Issued document:</strong> ${item.issuedDocument.referenceNo}` : '',
+    item.issuedDocument?.verificationCode ? `<strong>Verification code:</strong> ${item.issuedDocument.verificationCode}` : '',
     handler ? `<strong>Handled by:</strong> ${handler}` : '',
     note ? `<strong>Note:</strong> ${note}` : '',
     comment ? `<strong>Comment from the admins:</strong> ${comment}` : '',
   ].filter(Boolean);
   const textLines = [
     `Service request ${item.referenceNo} was updated to ${item.status}.`,
+    item.issuedDocument?.referenceNo ? `Issued document: ${item.issuedDocument.referenceNo}` : '',
+    item.issuedDocument?.verificationCode ? `Verification code: ${item.issuedDocument.verificationCode}` : '',
     handler ? `Handled by: ${handler}` : '',
     note ? `Note: ${note}` : '',
     comment ? `Comment from the admins: ${comment}` : '',
@@ -274,6 +333,8 @@ router.post('/requests', auth, async (req, res) => {
   try {
     const missing = requireTextFields(req.body, ['serviceType', 'fullName', 'contactNumber', 'address', 'purpose']);
     if (missing) return res.status(400).json({ msg: missing });
+    const serviceType = normalizeServiceCode(req.body.serviceType);
+    if (!serviceType) return res.status(400).json({ msg: 'Service type is required.' });
     const fullNameError = personNameError(req.body.fullName, 'Full name');
     if (fullNameError) {
       return res.status(400).json({ msg: fullNameError });
@@ -285,6 +346,28 @@ router.post('/requests', auth, async (req, res) => {
     if (purpose.length < 5) {
       return res.status(400).json({ msg: 'Purpose must be at least 5 characters long.' });
     }
+    const requestFor = req.body.requestFor === 'on-behalf' ? 'on-behalf' : 'self';
+    const requirements = normalizeServiceRequirements(req.body.requirements);
+    if (req.user.role === 'resident' && DOCUMENT_SERVICE_CODES.includes(serviceType) && requirements.length === 0) {
+      return res.status(400).json({ msg: 'Please upload at least one requirement before submitting this document request.' });
+    }
+    const beneficiary = {
+      fullName: cleanText(req.body.beneficiary?.fullName, { max: 140 }),
+      relationship: cleanText(req.body.beneficiary?.relationship, { max: 80 }),
+      contactNumber: cleanText(req.body.beneficiary?.contactNumber, { max: 20 }),
+      reason: cleanText(req.body.beneficiary?.reason || req.body.beneficiaryReason, { max: 500 }),
+    };
+    if (requestFor === 'on-behalf') {
+      const beneficiaryNameError = personNameError(beneficiary.fullName, 'Beneficiary full name');
+      if (beneficiaryNameError) return res.status(400).json({ msg: beneficiaryNameError });
+      if (!beneficiary.relationship) return res.status(400).json({ msg: 'Relationship to the resident is required for request-on-behalf.' });
+      if (!isValidPhilippineMobile(beneficiary.contactNumber)) {
+        return res.status(400).json({ msg: 'Beneficiary contact number must be exactly 11 digits and start with 09.' });
+      }
+      if (beneficiary.reason.length < 5) {
+        return res.status(400).json({ msg: 'Reason for requesting on behalf must be at least 5 characters long.' });
+      }
+    }
     const hasMongoActor = mongoose.Types.ObjectId.isValid(String(req.user.id || ''));
     const parentUser = hasMongoActor
       ? await User.findById(req.user.id).select('firstName lastName email children')
@@ -292,16 +375,35 @@ router.post('/requests', auth, async (req, res) => {
     if (req.user.role === 'resident' && !parentUser) {
       return res.status(404).json({ msg: 'User not found' });
     }
+    if (parentUser?._id && DOCUMENT_SERVICE_CODES.includes(serviceType)) {
+      const { start, end } = getManilaDayRange();
+      const duplicate = await ServiceRequest.findOne({
+        user: parentUser._id,
+        serviceType,
+        createdAt: { $gte: start, $lt: end },
+        status: { $nin: ['rejected', 'cancelled'] },
+      }).select('referenceNo').lean();
+      if (duplicate) {
+        return res.status(409).json({
+          msg: 'You already submitted this type of request today. Please wait for the current request to be processed.',
+          referenceNo: duplicate.referenceNo,
+        });
+      }
+    }
     const referenceNo = makeReference('SVC');
     const actingChild = parentUser && req.user.actingChild
       ? (parentUser.children || []).find((child) => String(child._id) === String(req.user.actingChild.id))
       : null;
     const request = await ServiceRequest.create({
-      serviceType: cleanText(req.body.serviceType, { max: 120 }),
+      serviceType,
       fullName: cleanText(req.body.fullName, { max: 140 }),
       contactNumber: cleanText(req.body.contactNumber, { max: 20 }),
       address: cleanText(req.body.address, { max: 300 }),
       purpose,
+      requestFor,
+      beneficiary: requestFor === 'on-behalf' ? beneficiary : {},
+      requirements,
+      requirementStatus: requirements.length > 0 ? 'pending' : 'complete',
       user: parentUser?._id || null,
       referenceNo,
       history: [{ status: 'pending', by: hasMongoActor ? req.user.id : undefined, note: 'Request submitted' }],
@@ -325,9 +427,11 @@ router.post('/requests', auth, async (req, res) => {
       `<strong>Reference:</strong> ${referenceNo}`,
       `<strong>Service:</strong> ${request.serviceType}`,
       `<strong>Submitted by:</strong> ${actingChild ? `${actingChild.fullName} using parent account` : request.fullName}`,
+      requestFor === 'on-behalf' ? `<strong>Requested for:</strong> ${beneficiary.fullName} (${beneficiary.relationship})` : '',
+      requirements.length > 0 ? `<strong>Uploaded requirements:</strong> ${requirements.length}` : '',
       parentUser?.email ? `<strong>Parent account:</strong> ${parentUser.email}` : `<strong>Created by:</strong> ${req.user.role}`,
       `<strong>Status:</strong> pending`,
-    ];
+    ].filter(Boolean);
 
     if (adminRecipients.length > 0) {
       await sendUserMail({
@@ -412,7 +516,7 @@ router.patch('/requests/:id/status', auth, requireRoles('admin', 'superadmin'), 
   try {
     const { status, note, adminComment } = req.body;
 
-    if (status && !['pending', 'in-review', 'approved', 'rejected', 'completed'].includes(status)) {
+    if (status && !SERVICE_STATUSES.includes(status)) {
       return res.status(400).json({ msg: 'Invalid status' });
     }
 
@@ -426,6 +530,13 @@ router.patch('/requests/:id/status', auth, requireRoles('admin', 'superadmin'), 
     if (status) {
       const hasMongoActor = mongoose.Types.ObjectId.isValid(String(req.user.id || ''));
       item.status = status;
+      if (status === 'released') {
+        item.issuedDocument = makeIssuedDocument(actor, item.issuedDocument?.toObject ? item.issuedDocument.toObject() : item.issuedDocument);
+        item.requirementStatus = 'complete';
+      }
+      if (status === 'approved' || status === 'for-pickup') {
+        item.requirementStatus = item.requirementStatus === 'needs-resubmission' ? 'pending' : 'complete';
+      }
       item.history.push({ status, by: hasMongoActor ? req.user.id : undefined, note: note || adminComment || '' });
     }
     if (adminComment !== undefined) item.adminComment = String(adminComment || '').trim();
@@ -455,9 +566,10 @@ router.patch('/requests/:id/status', auth, requireRoles('admin', 'superadmin'), 
 router.put('/requests/:id', auth, requireRoles('admin', 'superadmin'), requireAdminPermission('serviceRequests', 'edit'), async (req, res) => {
   try {
     const update = {};
-    ['serviceType', 'fullName', 'contactNumber', 'address', 'purpose', 'status', 'adminComment'].forEach((key) => {
+    ['serviceType', 'fullName', 'contactNumber', 'address', 'purpose', 'status', 'adminComment', 'requirementStatus'].forEach((key) => {
       if (req.body[key] !== undefined) update[key] = typeof req.body[key] === 'string' ? cleanText(req.body[key], { max: key === 'purpose' ? 1500 : 500 }) : req.body[key];
     });
+    if (update.serviceType !== undefined) update.serviceType = normalizeServiceCode(update.serviceType);
     if (update.fullName !== undefined) {
       const fullNameError = personNameError(update.fullName, 'Full name');
       if (fullNameError) {
@@ -470,8 +582,11 @@ router.put('/requests/:id', auth, requireRoles('admin', 'superadmin'), requireAd
     if (update.purpose !== undefined && String(update.purpose).length < 5) {
       return res.status(400).json({ msg: 'Purpose must be at least 5 characters long.' });
     }
-    if (update.status && !['pending', 'in-review', 'approved', 'rejected', 'completed'].includes(update.status)) {
+    if (update.status && !SERVICE_STATUSES.includes(update.status)) {
       return res.status(400).json({ msg: 'Invalid status' });
+    }
+    if (update.requirementStatus && !['pending', 'complete', 'needs-resubmission'].includes(update.requirementStatus)) {
+      return res.status(400).json({ msg: 'Invalid requirement status' });
     }
 
     const existing = await ServiceRequest.findById(req.params.id);
@@ -489,6 +604,13 @@ router.put('/requests/:id', auth, requireRoles('admin', 'superadmin'), requireAd
     const item = await ServiceRequest.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' });
     if (update.status && update.status !== previousStatus) {
       const hasMongoActor = mongoose.Types.ObjectId.isValid(String(req.user.id || ''));
+      if (update.status === 'released') {
+        item.issuedDocument = makeIssuedDocument(actor, item.issuedDocument?.toObject ? item.issuedDocument.toObject() : item.issuedDocument);
+        item.requirementStatus = 'complete';
+      }
+      if (update.status === 'approved' || update.status === 'for-pickup') {
+        item.requirementStatus = item.requirementStatus === 'needs-resubmission' ? 'pending' : 'complete';
+      }
       item.history.push({ status: update.status, by: hasMongoActor ? req.user.id : undefined, note: req.body.note || 'Updated from dashboard' });
       await item.save();
     }

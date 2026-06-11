@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle, Upload, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, MapPin, Upload, X } from 'lucide-react';
 import { Reveal } from '@/components/Reveal';
 import { Chatbot } from "@/components/Chatbot";
 import { Header } from "@/components/Header";
@@ -16,6 +16,8 @@ export default function ReportIssue() {
   const [referenceNumber, setReferenceNumber] = useState('');
   const [submitProgress, setSubmitProgress] = useState(0);
   const [attachments, setAttachments] = useState<Array<{ name: string; type: string; size: number; dataUrl: string }>>([]);
+  const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number; accuracy?: number | null } | null>(null);
+  const [locationStatus, setLocationStatus] = useState("");
   const [feedback, setFeedback] = useState<{ isOpen: boolean; title: string; message: string; type: "success" | "error" }>({
     isOpen: false,
     title: "",
@@ -26,6 +28,8 @@ export default function ReportIssue() {
     fullName: '',
     contactNumber: '',
     address: '',
+    reportType: 'community-issue',
+    priority: 'normal',
     category: '',
     description: '',
   });
@@ -37,6 +41,9 @@ export default function ReportIssue() {
     'Noise Complaint',
     'Suspicious Activity',
     'Stray Animal',
+    'Filing Complaint',
+    'Incident Report',
+    'Public Safety Concern',
   ];
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -74,6 +81,28 @@ export default function ReportIssue() {
     e.target.value = "";
   };
 
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationStatus("Location is not supported by this browser.");
+      return;
+    }
+    setLocationStatus("Getting current location...");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocationCoords({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+        });
+        setLocationStatus("Current location attached to this report.");
+      },
+      () => {
+        setLocationStatus("Location permission was not allowed. You can still type the complete address.");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
+    );
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isValidPersonName(formData.fullName)) {
@@ -92,11 +121,22 @@ export default function ReportIssue() {
     setSubmitProgress(20);
 
     try {
-      const res = await api.post('/api/reports', { ...formData, attachments }, { headers: authHeaders() });
+      const res = await api.post('/api/reports', {
+        ...formData,
+        attachments,
+        location: {
+          address: formData.address,
+          lat: locationCoords?.lat,
+          lng: locationCoords?.lng,
+          note: locationCoords ? `Browser location accuracy: ${Math.round(locationCoords.accuracy || 0)} meters` : '',
+        },
+      }, { headers: authHeaders() });
       setReferenceNumber(res.data.referenceNo);
       setIsSuccessModalOpen(true);
-      setFormData({ fullName: '', contactNumber: '', address: '', category: '', description: '' });
+      setFormData({ fullName: '', contactNumber: '', address: '', reportType: 'community-issue', priority: 'normal', category: '', description: '' });
       setAttachments([]);
+      setLocationCoords(null);
+      setLocationStatus("");
     } catch (err: any) {
       setFeedback({ isOpen: true, title: "Submit Failed", message: err.response?.data?.msg || "Failed to submit report", type: "error" });
     } finally {
@@ -145,6 +185,25 @@ export default function ReportIssue() {
                 <input required className="w-full rounded-md border border-gray-300 p-3" name="address" value={formData.address} onChange={handleInputChange} />
               </div>
 
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-bold text-gray-900">Report Type</label>
+                  <select required className="w-full rounded-md border border-gray-300 p-3" name="reportType" value={formData.reportType} onChange={handleInputChange}>
+                    <option value="community-issue">Community Issue</option>
+                    <option value="complaint">Filing Complaint</option>
+                    <option value="incident-report">Incident Report</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-bold text-gray-900">Priority / Urgency</label>
+                  <select required className="w-full rounded-md border border-gray-300 p-3" name="priority" value={formData.priority} onChange={handleInputChange}>
+                    <option value="low">Low</option>
+                    <option value="normal">Normal</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="mb-1.5 block text-sm font-bold text-gray-900">Issue Category</label>
                 <select required className="w-full rounded-md border border-gray-300 p-3" name="category" value={formData.category} onChange={handleInputChange}>
@@ -158,6 +217,28 @@ export default function ReportIssue() {
               <div>
                 <label className="mb-1.5 block text-sm font-bold text-gray-900">Description</label>
                 <textarea required rows={4} className="w-full resize-none rounded-md border border-gray-300 p-3" name="description" value={formData.description} onChange={handleInputChange} />
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-bold text-gray-900">Report Location Pin</p>
+                    <p className="text-xs text-slate-500">Optional, but useful for streetlight, road, sanitation, and public safety reports.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleUseCurrentLocation}
+                    className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    <MapPin size={16} /> Use Current Location
+                  </button>
+                </div>
+                {locationStatus ? <p className="mt-3 text-xs font-semibold text-slate-600">{locationStatus}</p> : null}
+                {locationCoords ? (
+                  <p className="mt-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                    Coordinates attached: {locationCoords.lat.toFixed(5)}, {locationCoords.lng.toFixed(5)}
+                  </p>
+                ) : null}
               </div>
 
               <div>

@@ -3,7 +3,7 @@ import { Footer } from "@/components/Footer";
 import { Chatbot } from "@/components/Chatbot";
 import { Reveal } from "@/components/Reveal";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, CheckCircle, Clock, FileText, History, Search, X } from "lucide-react";
+import { ArrowRight, CheckCircle, Clock, FileText, History, Search, Trash2, Upload, X } from "lucide-react";
 import { api, authHeaders } from "@/lib/api";
 import { hasAuthSession } from "@/lib/auth";
 import { FeedbackModal } from "@/components/FeedbackModal";
@@ -23,11 +23,51 @@ type ServiceRequest = {
   referenceNo: string;
   serviceType: string;
   status: string;
+  purpose?: string;
+  adminComment?: string;
+  requestFor?: "self" | "on-behalf";
+  beneficiary?: {
+    fullName?: string;
+    relationship?: string;
+    contactNumber?: string;
+    reason?: string;
+  };
+  requirementStatus?: string;
+  requirements?: ServiceRequirementAttachment[];
+  issuedDocument?: {
+    referenceNo?: string;
+    verificationCode?: string;
+    releasedAt?: string;
+    releasedByName?: string;
+    releasedByRole?: string;
+  };
   createdAt: string;
   updatedAt?: string;
 };
 
+type ServiceRequirementAttachment = {
+  label: string;
+  name: string;
+  type: string;
+  size: number;
+  dataUrl: string;
+};
+
 const HISTORY_PAGE_SIZE = 5;
+const MAX_SERVICE_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+
+const emptyServiceForm = {
+  fullName: "",
+  contactNumber: "",
+  address: "",
+  purpose: "",
+  requestFor: "self" as "self" | "on-behalf",
+  beneficiaryFullName: "",
+  beneficiaryRelationship: "",
+  beneficiaryContactNumber: "",
+  beneficiaryReason: "",
+  requirements: [] as ServiceRequirementAttachment[],
+};
 
 const REQUIRED_SERVICES: ServiceCatalog[] = [
   {
@@ -54,19 +94,36 @@ const REQUIRED_SERVICES: ServiceCatalog[] = [
     requirements: ["Valid ID", "Proof of Residency", "2x2 Photo"],
     time: "20 Mins",
   },
+  {
+    code: "residency-certificate",
+    title: "Certificate of Residency",
+    desc: "Proof that the requester is a resident of Barangay Mambog II.",
+    usage: "School, employment, local verification",
+    requirements: ["Valid ID", "Proof of current address"],
+    time: "15 Mins",
+  },
 ];
 
 const iconMap: Record<string, typeof FileText> = {
   "barangay-clearance": FileText,
   "certificate-of-indigency": FileText,
   "barangay-id": FileText,
+  "residency-certificate": FileText,
 };
+
+function serviceTitle(value: string) {
+  return REQUIRED_SERVICES.find((item) => item.code === value)?.title || value;
+}
+
+function statusLabel(value: string) {
+  return String(value || "pending").replace(/-/g, " ");
+}
 
 export default function Services() {
   const [services, setServices] = useState<ServiceCatalog[]>([]);
   const [content, setContent] = useState<{ servicesHeroTitle: string; servicesHeroSubtitle: string }>({
     servicesHeroTitle: "Online Services Portal",
-    servicesHeroSubtitle: "Certificate of Indigency, Barangay Clearance, and Barangay ID requests with clear request tracking.",
+    servicesHeroSubtitle: "Request Barangay Clearance, Barangay ID, Certificate of Residency, and Certificate of Indigency with clear tracking.",
   });
   const [history, setHistory] = useState<ServiceRequest[]>([]);
   const [activeCode, setActiveCode] = useState<string | null>(null);
@@ -79,7 +136,7 @@ export default function Services() {
   const [historyPage, setHistoryPage] = useState(1);
   const [trackRef, setTrackRef] = useState("");
   const [tracked, setTracked] = useState<ServiceRequest | null>(null);
-  const [formData, setFormData] = useState({ fullName: "", contactNumber: "", address: "", purpose: "" });
+  const [formData, setFormData] = useState(emptyServiceForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitProgress, setSubmitProgress] = useState(0);
   const [isTracking, setIsTracking] = useState(false);
@@ -154,6 +211,41 @@ export default function Services() {
     loadData();
   }, []);
 
+  const fileToDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+
+  const handleRequirementUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const accepted: ServiceRequirementAttachment[] = [];
+    for (const file of files.slice(0, 5)) {
+      if (!file.type.startsWith("image/") && file.type !== "application/pdf") {
+        setFeedback({ isOpen: true, title: "Invalid Requirement", message: "Upload image or PDF files only.", type: "error" });
+        continue;
+      }
+      if (file.size > MAX_SERVICE_ATTACHMENT_BYTES) {
+        setFeedback({ isOpen: true, title: "Requirement Too Large", message: `${file.name} must be 3MB or below.`, type: "error" });
+        continue;
+      }
+      const dataUrl = await fileToDataUrl(file);
+      accepted.push({
+        label: "Requirement",
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        dataUrl,
+      });
+    }
+    if (accepted.length > 0) {
+      setFormData((prev) => ({ ...prev, requirements: [...prev.requirements, ...accepted].slice(0, 5) }));
+    }
+    e.target.value = "";
+  };
+
   const submitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeCode) return;
@@ -169,6 +261,24 @@ export default function Services() {
       setFeedback({ isOpen: true, title: "Invalid Contact", message: "Phone number must be 11 digits and start with 09.", type: "error" });
       return;
     }
+    if (formData.requirements.length === 0) {
+      setFeedback({ isOpen: true, title: "Requirement Needed", message: "Please upload at least one requirement before submitting this document request.", type: "error" });
+      return;
+    }
+    if (formData.requestFor === "on-behalf") {
+      if (!isValidPersonName(formData.beneficiaryFullName)) {
+        setFeedback({ isOpen: true, title: "Invalid Beneficiary Name", message: personNameMessage("Beneficiary full name"), type: "error" });
+        return;
+      }
+      if (!/^09\d{9}$/.test(formData.beneficiaryContactNumber)) {
+        setFeedback({ isOpen: true, title: "Invalid Beneficiary Contact", message: "Beneficiary contact must be 11 digits and start with 09.", type: "error" });
+        return;
+      }
+      if (!formData.beneficiaryRelationship.trim() || formData.beneficiaryReason.trim().length < 5) {
+        setFeedback({ isOpen: true, title: "More Details Needed", message: "Please provide relationship and reason when requesting on behalf of someone else.", type: "error" });
+        return;
+      }
+    }
     setIsSubmitting(true);
     setSubmitProgress(25);
 
@@ -181,13 +291,21 @@ export default function Services() {
           contactNumber: formData.contactNumber,
           address: formData.address,
           purpose: formData.purpose,
+          requestFor: formData.requestFor,
+          beneficiary: {
+            fullName: formData.beneficiaryFullName,
+            relationship: formData.beneficiaryRelationship,
+            contactNumber: formData.beneficiaryContactNumber,
+            reason: formData.beneficiaryReason,
+          },
+          requirements: formData.requirements,
         },
         { headers: authHeaders() },
       );
 
       setActiveCode(null);
       setShowRequestModal(false);
-      setFormData({ fullName: "", contactNumber: "", address: "", purpose: "" });
+      setFormData({ ...emptyServiceForm, requirements: [] });
       setFeedback({
         isOpen: true,
         title: "Request Submitted",
@@ -281,13 +399,13 @@ export default function Services() {
                 {visiblePreviewHistory.map((item) => (
                   <div key={item._id} className="rounded border border-slate-200 p-2">
                     <p className="font-semibold text-slate-900">{item.referenceNo}</p>
-                    <p className="text-slate-500">{item.serviceType} • {item.status}</p>
+                    <p className="text-slate-500">{serviceTitle(item.serviceType)} • {statusLabel(item.status)}</p>
                   </div>
                 ))}
                 {blurredPreviewHistory.map((item) => (
                   <div key={item._id} className="pointer-events-none rounded border border-slate-200 bg-slate-50 p-2 opacity-70 blur-[1px]">
                     <p className="font-semibold text-slate-900">{item.referenceNo}</p>
-                    <p className="text-slate-500">{item.serviceType} • {item.status}</p>
+                    <p className="text-slate-500">{serviceTitle(item.serviceType)} • {statusLabel(item.status)}</p>
                   </div>
                 ))}
                 {extraHistoryCount > 0 ? (
@@ -301,14 +419,12 @@ export default function Services() {
           </div>
 
           <div className="grid gap-6 md:grid-cols-2">
-            {services.map((service, idx) => {
+            {services.map((service) => {
               const Icon = (iconMap as any)[service.code] || FileText;
               return (
                 <button
                   key={service.code}
-                  className={`h-full rounded-xl border border-slate-200 bg-white p-6 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md ${
-                    idx === 2 ? "md:col-span-2 md:w-full md:max-w-2xl md:justify-self-center" : ""
-                  }`}
+                  className="h-full rounded-xl border border-slate-200 bg-white p-6 text-left shadow-sm transition hover:-translate-y-1 hover:shadow-md"
                   onClick={() => {
                     if (!hasAuthSession()) {
                       setFeedback({ isOpen: true, title: "Login Required", message: "Please log in as a resident before starting a barangay service request.", type: "error" });
@@ -348,8 +464,16 @@ export default function Services() {
             {tracked && (
               <div className="mt-4 rounded-lg border border-slate-200 p-3 text-sm">
                 <p className="font-semibold text-slate-900">{tracked.referenceNo}</p>
-                <p className="text-slate-600">{tracked.serviceType}</p>
-                <p className="text-slate-600">Status: {tracked.status}</p>
+                <p className="text-slate-600">{serviceTitle(tracked.serviceType)}</p>
+                <p className="text-slate-600">Status: {statusLabel(tracked.status)}</p>
+                {tracked.adminComment ? <p className="mt-2 text-slate-600">Admin remarks: {tracked.adminComment}</p> : null}
+                {tracked.issuedDocument?.referenceNo ? (
+                  <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-emerald-900">
+                    <p className="font-bold">Released document</p>
+                    <p>Document ref: {tracked.issuedDocument.referenceNo}</p>
+                    <p>Verification code: {tracked.issuedDocument.verificationCode}</p>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
@@ -366,6 +490,15 @@ export default function Services() {
                 <p className="mt-1 text-sm text-slate-600">{activeService.desc}</p>
                 {isSubmitting && <div className="mt-3"><p className="mb-1 text-xs text-slate-500">Submitting request... {submitProgress}%</p><div className="h-2 rounded bg-slate-200"><div className="h-2 rounded bg-emerald-600 transition-all" style={{ width: `${submitProgress}%` }} /></div></div>}
                 <form className="mt-6 space-y-3" onSubmit={submitRequest}>
+                  <select
+                    required
+                    className="w-full rounded-lg border px-3 py-2"
+                    value={formData.requestFor}
+                    onChange={(e) => setFormData((p) => ({ ...p, requestFor: e.target.value as "self" | "on-behalf" }))}
+                  >
+                    <option value="self">Requesting for myself</option>
+                    <option value="on-behalf">Requesting on behalf of someone else</option>
+                  </select>
                   <input required className="w-full rounded-lg border px-3 py-2" placeholder="Full Name" value={formData.fullName} onChange={(e) => setFormData((p) => ({ ...p, fullName: cleanPersonNameInput(e.target.value) }))} />
                   <input required className="w-full rounded-lg border px-3 py-2" placeholder="09XXXXXXXXX" type="tel" inputMode="numeric" pattern="09[0-9]{9}" maxLength={11} value={formData.contactNumber} onChange={(e) => setFormData((p) => ({ ...p, contactNumber: e.target.value.replace(/\D/g, "").slice(0, 11) }))} />
                   <input required className="w-full rounded-lg border px-3 py-2" placeholder="Address" value={formData.address} onChange={(e) => setFormData((p) => ({ ...p, address: e.target.value }))} />
@@ -376,6 +509,43 @@ export default function Services() {
                     <option value="benefits">Government Assistance</option>
                     <option value="other">Other</option>
                   </select>
+                  {formData.requestFor === "on-behalf" ? (
+                    <div className="grid gap-3 rounded-xl border border-blue-100 bg-blue-50 p-3 md:grid-cols-2">
+                      <input required className="rounded-lg border px-3 py-2" placeholder="Beneficiary full name" value={formData.beneficiaryFullName} onChange={(e) => setFormData((p) => ({ ...p, beneficiaryFullName: cleanPersonNameInput(e.target.value) }))} />
+                      <input required className="rounded-lg border px-3 py-2" placeholder="Relationship to resident" value={formData.beneficiaryRelationship} onChange={(e) => setFormData((p) => ({ ...p, beneficiaryRelationship: e.target.value }))} />
+                      <input required className="rounded-lg border px-3 py-2" placeholder="Beneficiary contact number" type="tel" inputMode="numeric" pattern="09[0-9]{9}" maxLength={11} value={formData.beneficiaryContactNumber} onChange={(e) => setFormData((p) => ({ ...p, beneficiaryContactNumber: e.target.value.replace(/\D/g, "").slice(0, 11) }))} />
+                      <input required className="rounded-lg border px-3 py-2" placeholder="Reason for requesting on behalf" value={formData.beneficiaryReason} onChange={(e) => setFormData((p) => ({ ...p, beneficiaryReason: e.target.value }))} />
+                    </div>
+                  ) : null}
+                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg bg-white px-4 py-5 text-center transition hover:bg-slate-50">
+                      <input type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={handleRequirementUpload} />
+                      <Upload className="mb-2 text-slate-400" size={24} />
+                      <span className="text-sm font-semibold text-slate-800">Upload requirements</span>
+                      <span className="mt-1 text-xs text-slate-500">Images or PDF up to 3MB each. Required before submission.</span>
+                    </label>
+                    {formData.requirements.length > 0 ? (
+                      <div className="mt-3 space-y-2">
+                        {formData.requirements.map((file, index) => (
+                          <div key={`${file.name}-${index}`} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2 text-sm">
+                            <FileText size={16} className="text-slate-500" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-semibold text-slate-800">{file.name}</p>
+                              <p className="text-xs text-slate-500">{Math.round(file.size / 1024)} KB</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setFormData((p) => ({ ...p, requirements: p.requirements.filter((_, i) => i !== index) }))}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-red-50 hover:text-red-600"
+                              aria-label={`Remove ${file.name}`}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                   <button disabled={isSubmitting} type="submit" className="w-full rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">{isSubmitting ? "Submitting..." : "Submit Request"}</button>
                 </form>
               </div>
@@ -453,11 +623,22 @@ export default function Services() {
                     return (
                       <tr key={item._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">{item.referenceNo}</td>
-                        <td className="px-4 py-3 text-slate-700">{item.serviceType}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          <p className="font-semibold text-slate-800">{serviceTitle(item.serviceType)}</p>
+                          {item.requestFor === "on-behalf" && item.beneficiary?.fullName ? (
+                            <p className="mt-1 text-xs text-slate-500">For {item.beneficiary.fullName}</p>
+                          ) : null}
+                        </td>
                         <td className="px-4 py-3 text-slate-600">{invalidDate ? "N/A" : date.toLocaleDateString()}</td>
                         <td className="px-4 py-3 text-slate-600">{invalidDate ? "N/A" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
                         <td className="px-4 py-3">
-                          <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">{item.status}</span>
+                          <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-bold capitalize text-blue-700">{statusLabel(item.status)}</span>
+                          {item.adminComment ? <p className="mt-2 max-w-xs text-xs text-slate-500">Remarks: {item.adminComment}</p> : null}
+                          {item.issuedDocument?.referenceNo ? (
+                            <p className="mt-2 max-w-xs rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">
+                              Released: {item.issuedDocument.referenceNo}
+                            </p>
+                          ) : null}
                         </td>
                       </tr>
                     );

@@ -30,6 +30,7 @@ export const publicSubmitLimiter = rateLimit({
   limit: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method !== 'POST',
   handler: jsonLimitHandler,
 });
 

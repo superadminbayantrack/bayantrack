@@ -19,6 +19,33 @@ type Activity = {
   createdAt: string;
 };
 
+type ResidentReportActivity = {
+  _id: string;
+  referenceNo: string;
+  reportType?: string;
+  category?: string;
+  status?: string;
+  priority?: string;
+  hearingSchedule?: { date?: string; time?: string; venue?: string };
+  updatedAt?: string;
+  createdAt?: string;
+};
+
+type ResidentSeminarActivity = {
+  _id: string;
+  referenceNumber: string;
+  relatedReferenceNo?: string;
+  type?: string;
+  title?: string;
+  scheduleDate?: string;
+  scheduleTime?: string;
+  venue?: string;
+  status?: string;
+  remarks?: string;
+  updatedAt?: string;
+  createdAt?: string;
+};
+
 type AddressDetails = {
   blk: string;
   lot: string;
@@ -41,6 +68,15 @@ const DEFAULT_ADDRESS: AddressDetails = {
   zipCode: "4102",
 };
 const ACTIVITY_PAGE_SIZE = 5;
+type ActivityCategoryFilter = "all" | "service-request" | "issue-report" | "child-access" | "case-seminar" | "profile-account";
+const ACTIVITY_CATEGORY_OPTIONS: Array<{ value: ActivityCategoryFilter; label: string }> = [
+  { value: "all", label: "All Activity" },
+  { value: "service-request", label: "Service Requests" },
+  { value: "issue-report", label: "Reports / Complaints" },
+  { value: "child-access", label: "Child Access" },
+  { value: "case-seminar", label: "Case / Seminar" },
+  { value: "profile-account", label: "Profile / Account" },
+];
 
 type ChildLink = {
   _id?: string;
@@ -131,6 +167,53 @@ function activityStatusLabel(activity: Activity) {
   return type.replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function activityCategory(activity: Activity): ActivityCategoryFilter {
+  const text = [
+    activity.type,
+    activity.title,
+    activity.referenceNo,
+    activityStatusLabel(activity),
+  ].join(" ").toLowerCase();
+
+  if (text.includes("seminar") || text.includes("intervention") || text.includes("case") || text.includes("blotter") || text.includes("hearing")) {
+    return "case-seminar";
+  }
+  if (text.includes("child")) return "child-access";
+  if (text.includes("service") || text.includes("svc") || text.includes("clearance") || text.includes("indigency") || text.includes("barangay id")) {
+    return "service-request";
+  }
+  if (text.includes("report") || text.includes("complaint") || text.includes("rpt") || text.includes("rumor") || text.includes("fact")) {
+    return "issue-report";
+  }
+  return "profile-account";
+}
+
+function reportToActivity(report: ResidentReportActivity): Activity {
+  const hearing = report.hearingSchedule?.date
+    ? ` Hearing: ${report.hearingSchedule.date}${report.hearingSchedule.time ? ` ${report.hearingSchedule.time}` : ""}${report.hearingSchedule.venue ? ` at ${report.hearingSchedule.venue}` : ""}.`
+    : "";
+  return {
+    _id: `report-${report._id}`,
+    title: `${report.category || "Report"} is ${String(report.status || "new").replace(/-/g, " ")}.${hearing}`,
+    type: report.reportType || "community-report",
+    referenceNo: report.referenceNo,
+    createdAt: report.updatedAt || report.createdAt || new Date().toISOString(),
+  };
+}
+
+function seminarToActivity(item: ResidentSeminarActivity): Activity {
+  const schedule = item.scheduleDate
+    ? ` Schedule: ${item.scheduleDate}${item.scheduleTime ? ` ${item.scheduleTime}` : ""}${item.venue ? ` at ${item.venue}` : ""}.`
+    : "";
+  return {
+    _id: `seminar-${item._id}`,
+    title: `${item.title || item.type || "Seminar / Intervention"} is ${item.status || "assigned"}.${schedule}`,
+    type: "seminar-intervention",
+    referenceNo: item.relatedReferenceNo || item.referenceNumber,
+    createdAt: item.updatedAt || item.createdAt || new Date().toISOString(),
+  };
+}
+
 function childStatusDotClass(status?: ChildLink["status"]) {
   if (status === "approved") return "bg-emerald-500 ring-emerald-100";
   if (status === "rejected") return "bg-red-500 ring-red-100";
@@ -145,8 +228,10 @@ export default function ProfileSettings() {
   const [saving, setSaving] = useState(false);
   const [saveProgress, setSaveProgress] = useState(0);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [caseSeminarHistory, setCaseSeminarHistory] = useState<ResidentSeminarActivity[]>([]);
   const [showAllActivities, setShowAllActivities] = useState(false);
   const [activitySearch, setActivitySearch] = useState("");
+  const [activityCategoryFilter, setActivityCategoryFilter] = useState<ActivityCategoryFilter>("all");
   const [activityDateFilter, setActivityDateFilter] = useState("");
   const [activityTimeFilter, setActivityTimeFilter] = useState("");
   const [activityPage, setActivityPage] = useState(1);
@@ -200,9 +285,11 @@ export default function ProfileSettings() {
 
   const fetchProfile = async () => {
     try {
-      const [userResult, activityResult] = await Promise.allSettled([
+      const [userResult, activityResult, reportResult, seminarResult] = await Promise.allSettled([
         quietApi.get("/api/auth/user"),
         quietApi.get("/api/admin/activity/me", { headers: authHeaders() }),
+        quietApi.get("/api/reports/me", { headers: authHeaders() }),
+        quietApi.get("/api/seminars/me", { headers: authHeaders() }),
       ]);
 
       if (userResult.status !== "fulfilled") {
@@ -245,7 +332,14 @@ export default function ProfileSettings() {
           ...(user.addressDetails || {}),
         });
         setChildren(Array.isArray(user.children) ? user.children : []);
-        setActivities([]);
+        const seminarItems = seminarResult.status === "fulfilled" && Array.isArray(seminarResult.value.data)
+          ? seminarResult.value.data
+          : [];
+        setCaseSeminarHistory(seminarItems);
+        const reportRows = reportResult.status === "fulfilled" && Array.isArray(reportResult.value.data)
+          ? reportResult.value.data.map(reportToActivity)
+          : [];
+        setActivities([...reportRows, ...seminarItems.map(seminarToActivity)].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()));
         return;
       }
 
@@ -279,11 +373,18 @@ export default function ProfileSettings() {
       });
       setChildren(Array.isArray(user.children) ? user.children : []);
 
-      if (activityResult.status === "fulfilled") {
-        setActivities(Array.isArray(activityResult.value.data) ? activityResult.value.data : activityResult.value.data?.items || []);
-      } else {
-        setActivities([]);
-      }
+      const activityRows = activityResult.status === "fulfilled"
+        ? (Array.isArray(activityResult.value.data) ? activityResult.value.data : activityResult.value.data?.items || [])
+        : [];
+      const reportRows = reportResult.status === "fulfilled" && Array.isArray(reportResult.value.data)
+        ? reportResult.value.data.map(reportToActivity)
+        : [];
+      const seminarItems = seminarResult.status === "fulfilled" && Array.isArray(seminarResult.value.data)
+        ? seminarResult.value.data
+        : [];
+      setCaseSeminarHistory(seminarItems);
+      const seminarRows = seminarItems.map(seminarToActivity);
+      setActivities([...activityRows, ...reportRows, ...seminarRows].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()));
     } catch (err) {
       console.error("Failed to load profile settings:", err);
     }
@@ -619,9 +720,10 @@ export default function ProfileSettings() {
       ].some((value) => String(value || "").toLowerCase().includes(query));
       const matchesDate = !activityDateFilter || localDate === activityDateFilter;
       const matchesTime = !activityTimeFilter || localTime === activityTimeFilter;
-      return matchesSearch && matchesDate && matchesTime;
+      const matchesCategory = activityCategoryFilter === "all" || activityCategory(activity) === activityCategoryFilter;
+      return matchesSearch && matchesCategory && matchesDate && matchesTime;
     });
-  }, [activities, activityDateFilter, activitySearch, activityTimeFilter]);
+  }, [activities, activityCategoryFilter, activityDateFilter, activitySearch, activityTimeFilter]);
   const activityTotalPages = Math.max(1, Math.ceil(filteredActivities.length / ACTIVITY_PAGE_SIZE));
   const currentActivityPage = Math.min(activityPage, activityTotalPages);
   const paginatedActivities = filteredActivities.slice(
@@ -632,7 +734,7 @@ export default function ProfileSettings() {
 
   useEffect(() => {
     setActivityPage(1);
-  }, [activityDateFilter, activitySearch, activityTimeFilter]);
+  }, [activityCategoryFilter, activityDateFilter, activitySearch, activityTimeFilter]);
 
   const handleChildSessionRequestOtp = async () => {
     if (!childSessionForm.fullName.trim() || !childSessionForm.email.trim()) {
@@ -741,6 +843,37 @@ export default function ProfileSettings() {
                       </summary>
                       <p className="mt-2 text-sm leading-6 text-slate-600">{item.answer}</p>
                     </details>
+                  ))}
+                </div>
+              </section>
+
+              <section className="mb-8 rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-bold text-[#1e3a8a]">My Case / Blotter / Seminar History</h2>
+                    <p className="mt-1 text-xs text-slate-500">Official hearing, seminar, counseling, mediation, and intervention records assigned by the barangay.</p>
+                  </div>
+                  <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-bold text-slate-600">{caseSeminarHistory.length} records</span>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {caseSeminarHistory.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 md:col-span-2">No assigned seminar or intervention requirements right now.</p>
+                  ) : caseSeminarHistory.slice(0, 4).map((item) => (
+                    <div key={item._id} className="rounded-lg border border-slate-200 bg-slate-50/70 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-bold text-slate-900">{item.title || item.type || "Seminar / Intervention"}</p>
+                          <p className="mt-1 text-xs text-slate-500">{item.relatedReferenceNo || item.referenceNumber}</p>
+                        </div>
+                        <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600">{item.status || "Assigned"}</span>
+                      </div>
+                      <div className="mt-3 space-y-1 text-xs text-slate-600">
+                        <p><span className="font-bold text-slate-500">Type:</span> {item.type || "Barangay intervention"}</p>
+                        <p><span className="font-bold text-slate-500">Schedule:</span> {item.scheduleDate ? `${item.scheduleDate} ${item.scheduleTime || ""}` : "Not yet scheduled"}</p>
+                        <p><span className="font-bold text-slate-500">Venue:</span> {item.venue || "To be announced"}</p>
+                        {item.remarks ? <p><span className="font-bold text-slate-500">Remarks:</span> {item.remarks}</p> : null}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </section>
@@ -1182,7 +1315,7 @@ export default function ProfileSettings() {
                 <X size={18} />
               </button>
             </div>
-            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr,auto,auto]">
+            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[minmax(240px,1fr),minmax(190px,220px),auto,auto]">
               <div className="relative">
                 <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
@@ -1194,17 +1327,30 @@ export default function ProfileSettings() {
               </div>
               <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">
                 <Filter size={14} />
+                <select
+                  value={activityCategoryFilter}
+                  onChange={(e) => setActivityCategoryFilter(e.target.value as ActivityCategoryFilter)}
+                  className="min-w-0 flex-1 bg-transparent outline-none"
+                  aria-label="Filter activity category"
+                >
+                  {ACTIVITY_CATEGORY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">
+                <Filter size={14} />
                 <input type="date" value={activityDateFilter} onChange={(e) => setActivityDateFilter(e.target.value)} className="bg-transparent outline-none" />
               </label>
               <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">
                 <Clock size={14} />
                 <input type="time" value={activityTimeFilter} onChange={(e) => setActivityTimeFilter(e.target.value)} className="bg-transparent outline-none" />
               </label>
-              {(activitySearch || activityDateFilter || activityTimeFilter) && (
+              {(activitySearch || activityCategoryFilter !== "all" || activityDateFilter || activityTimeFilter) && (
                 <button
                   type="button"
-                  onClick={() => { setActivitySearch(""); setActivityDateFilter(""); setActivityTimeFilter(""); }}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 md:col-span-3"
+                  onClick={() => { setActivitySearch(""); setActivityCategoryFilter("all"); setActivityDateFilter(""); setActivityTimeFilter(""); }}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100 md:col-span-4"
                 >
                   Clear filters
                 </button>

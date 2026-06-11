@@ -10,6 +10,7 @@ import announcementsRoutes from './routes/announcements.js';
 import servicesRoutes from './routes/services.js';
 import contactRoutes from './routes/contact.js';
 import reportsRoutes from './routes/reports.js';
+import seminarsRoutes from './routes/seminars.js';
 import adminRoutes from './routes/admin.js';
 import officialsRoutes from './routes/officials.js';
 import subscriptionsRoutes from './routes/subscriptions.js';
@@ -459,6 +460,7 @@ export function createServer() {
   app.use('/api/services', servicesRoutes);
   app.use('/api/contact', contactRoutes);
   app.use('/api/reports', reportsRoutes);
+  app.use('/api/seminars', seminarsRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/officials', officialsRoutes);
   app.use('/api/subscriptions', subscriptionsRoutes);

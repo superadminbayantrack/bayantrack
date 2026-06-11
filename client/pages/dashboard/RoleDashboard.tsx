@@ -8,8 +8,8 @@ import { LogoutConfirmation } from "@/components/LogoutConfirmation";
 import dashboardLogo from "../../../assets/brandlogo/Brand_Logo_ADMINDASBOARD.png";
 
 interface DashboardProps { role: UserRole; }
-type Panel = "overview" | "users" | "officials" | "announcements" | "reports" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "restore" | "settings" | "notifications" | "audit";
-type FilterPanel = "users" | "announcements" | "reports" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "audit";
+type Panel = "overview" | "users" | "officials" | "announcements" | "reports" | "caseManagement" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "restore" | "settings" | "notifications" | "audit";
+type FilterPanel = "users" | "announcements" | "reports" | "caseManagement" | "emergencyAlerts" | "services" | "messages" | "subscriptions" | "audit";
 type MonthlyDetailKind = "users" | "services" | "reports" | "messages";
 type RatingRange = "days" | "weeks" | "months" | "years";
 type SnapshotModal = "activities" | "queue" | null;
@@ -49,9 +49,75 @@ type Official = { _id: string; name: string; role: string; level: "city" | "bara
 type AnnouncementItem = { _id: string; title: string; content?: string; category: string; module: string; source?: string; image?: string; archived?: boolean; createdAt?: string; eventDate?: string; eventTime?: string; location?: string; status?: string; };
 type HandlerInfo = { adminComment?: string; handledByUser?: string | null; handledByName?: string; handledByRole?: string; handledAt?: string; updatedAt?: string; };
 type HandlerOption = { value: string; label: string; category: "Admins" | "Barangay Officials / Staff"; name: string; role: string; userId: string | null };
-type ReportItem = HandlerInfo & { _id: string; fullName?: string; contactNumber?: string; address?: string; category: string; description: string; status: string; referenceNo: string; attachments?: Array<{ name?: string; type?: string; size?: number; dataUrl?: string }>; createdAt?: string; };
+type ReportItem = HandlerInfo & {
+  _id: string;
+  user?: string | Partial<UserItem> | null;
+  fullName?: string;
+  contactNumber?: string;
+  address?: string;
+  reportType?: "community-issue" | "complaint" | "incident-report";
+  priority?: "low" | "normal" | "urgent";
+  category: string;
+  description: string;
+  location?: { address?: string; lat?: number | null; lng?: number | null; note?: string };
+  assignedDepartment?: string;
+  assignedPersonnel?: string;
+  blotterRecord?: { referenceNo?: string; details?: string; status?: string; updatedAt?: string };
+  caseRecord?: { referenceNo?: string; details?: string; status?: string; updatedAt?: string };
+  hearingSchedule?: { date?: string; time?: string; venue?: string; remarks?: string; status?: string; updatedAt?: string };
+  closure?: { closedAt?: string; closedByName?: string; closedByRole?: string; reason?: string; seminarComplianceResult?: string; overrideReason?: string; finalRemarks?: string };
+  closureReason?: string;
+  finalRemarks?: string;
+  overrideReason?: string;
+  status: string;
+  referenceNo: string;
+  attachments?: Array<{ name?: string; type?: string; size?: number; dataUrl?: string }>;
+  createdAt?: string;
+};
+type SeminarRequirement = {
+  _id: string;
+  residentId?: string | UserItem;
+  residentName?: string;
+  relatedComplaintId?: string | ReportItem | null;
+  relatedCaseId?: string | null;
+  relatedBlotterId?: string | null;
+  referenceNumber: string;
+  relatedReferenceNo?: string;
+  type: "Barangay Seminar" | "Counseling" | "Mediation" | "Community Service" | "Orientation" | "Custom Procedure";
+  title: string;
+  description?: string;
+  scheduleDate?: string;
+  scheduleTime?: string;
+  venue?: string;
+  status: "Not Yet Scheduled" | "Scheduled" | "Attended" | "Missed" | "Completed" | "Failed to Comply" | "Cancelled" | "Re-Scheduled";
+  completionProof?: { name?: string; type?: string; size?: number; dataUrl?: string };
+  remarks?: string;
+  assignedByName?: string;
+  assignedByRole?: string;
+  completedByName?: string;
+  completedAt?: string;
+  dismissalEligible?: boolean;
+  overrideReason?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
 type AttachmentPreview = { title: string; name?: string; type?: string; dataUrl: string };
-type ServiceRequest = HandlerInfo & { _id: string; referenceNo: string; serviceType: string; fullName: string; contactNumber?: string; address?: string; purpose?: string; status: string; createdAt?: string; };
+type ServiceRequest = HandlerInfo & {
+  _id: string;
+  referenceNo: string;
+  serviceType: string;
+  fullName: string;
+  contactNumber?: string;
+  address?: string;
+  purpose?: string;
+  requestFor?: "self" | "on-behalf";
+  beneficiary?: { fullName?: string; relationship?: string; contactNumber?: string; reason?: string };
+  requirements?: Array<{ label?: string; name?: string; type?: string; size?: number; dataUrl?: string }>;
+  requirementStatus?: string;
+  issuedDocument?: { referenceNo?: string; verificationCode?: string; releasedAt?: string; releasedByName?: string; releasedByRole?: string };
+  status: string;
+  createdAt?: string;
+};
 type ContactMessage = HandlerInfo & { _id: string; referenceNo: string; name: string; contact?: string; department: string; message?: string; status: string; createdAt?: string; };
 type Department = { _id: string; name: string; contactPerson: string; localNumber: string; active?: boolean };
 type EvacuationCenter = { _id: string; name: string; address: string; active: boolean; capacity?: number; hazardsCovered?: string[]; notes?: string; location: { lat: number; lng: number } };
@@ -184,6 +250,26 @@ const defaultAdminPermissions = (): AdminPermissions => ({
   messages: defaultPermissionFlags(),
   subscribers: defaultPermissionFlags(),
 });
+const SEMINAR_TYPE_OPTIONS: SeminarRequirement["type"][] = ["Barangay Seminar", "Counseling", "Mediation", "Community Service", "Orientation", "Custom Procedure"];
+const SEMINAR_STATUS_OPTIONS: SeminarRequirement["status"][] = ["Not Yet Scheduled", "Scheduled", "Attended", "Missed", "Completed", "Failed to Comply", "Cancelled", "Re-Scheduled"];
+const REPORT_STATUS_OPTIONS = [
+  "new",
+  "received",
+  "in-review",
+  "in-progress",
+  "hearing-scheduled",
+  "seminar-intervention-required",
+  "seminar-completed",
+  "missed-seminar",
+  "failed-to-comply",
+  "re-scheduled",
+  "for-resolution",
+  "resolved",
+  "dismissed",
+  "closed",
+  "rejected",
+  "archived",
+];
 
 function normalizeAdminPermissions(value?: Partial<AdminPermissions>): AdminPermissions {
   const defaults = defaultAdminPermissions();
@@ -471,14 +557,18 @@ function userDisplayName(user?: Partial<UserItem>) {
   return [user?.firstName, user?.middleName, user?.lastName].filter(Boolean).join(" ").trim() || user?.username || user?.email || "Unnamed user";
 }
 
-function googleMapsUrl(location?: EmergencyAlertItem["currentLocation"]) {
+function googleMapsUrl(location?: { lat?: number | null; lng?: number | null }) {
   if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) return "";
   return `https://www.google.com/maps?q=${location.lat},${location.lng}`;
 }
 
-function formatCoordinates(location?: EmergencyAlertItem["currentLocation"]) {
+function formatCoordinates(location?: { lat?: number | null; lng?: number | null }) {
   if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lng)) return "No live location yet";
   return `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`;
+}
+
+function formatCodeLabel(value?: string) {
+  return String(value || '').replace(/-/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function normalizeBrandName(value?: string) {
@@ -573,6 +663,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [officials, setOfficials] = useState<Official[]>([]);
   const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([]);
   const [reports, setReports] = useState<ReportItem[]>([]);
+  const [seminarRequirements, setSeminarRequirements] = useState<SeminarRequirement[]>([]);
   const [services, setServices] = useState<ServiceRequest[]>([]);
   const [messages, setMessages] = useState<ContactMessage[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -590,6 +681,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [manageCentersOpen, setManageCentersOpen] = useState(false);
   const [manageHotlinesOpen, setManageHotlinesOpen] = useState(false);
   const [reportManageModal, setReportManageModal] = useState<ReportItem | null>(null);
+  const [seminarManageModal, setSeminarManageModal] = useState<SeminarRequirement | null>(null);
+  const [addSeminarOpen, setAddSeminarOpen] = useState(false);
   const [attachmentPreview, setAttachmentPreview] = useState<AttachmentPreview | null>(null);
   const [attachmentLoadingId, setAttachmentLoadingId] = useState<string | null>(null);
   const [liveAlertChatModal, setLiveAlertChatModal] = useState<EmergencyAlertItem | null>(null);
@@ -648,6 +741,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     users: { search: "", date: "", time: "" },
     announcements: { search: "", date: "", time: "" },
     reports: { search: "", date: "", time: "" },
+    caseManagement: { search: "", date: "", time: "" },
     emergencyAlerts: { search: "", date: todayInputValue(), time: "" },
     services: { search: "", date: "", time: "" },
     messages: { search: "", date: "", time: "" },
@@ -663,6 +757,18 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const [newDepartment, setNewDepartment] = useState({ name: "", contactPerson: "", localNumber: "" });
   const [newUser, setNewUser] = useState({ username: "", firstName: "", middleName: "", lastName: "", email: "", contactNumber: "", address: "", role: "resident", status: "active", password: "" });
   const [newReport, setNewReport] = useState({ fullName: "", contactNumber: "", address: "", category: "Garbage / Sanitation", description: "" });
+  const [newSeminar, setNewSeminar] = useState({
+    residentId: "",
+    relatedComplaintId: "",
+    type: "Barangay Seminar" as SeminarRequirement["type"],
+    title: "Barangay case intervention",
+    description: "",
+    scheduleDate: "",
+    scheduleTime: "",
+    venue: "Barangay Mambog II Hall",
+    status: "Not Yet Scheduled" as SeminarRequirement["status"],
+    remarks: "",
+  });
   const [newService, setNewService] = useState({ serviceType: "Barangay Clearance", fullName: "", contactNumber: "", address: "", purpose: "" });
   const [newMessage, setNewMessage] = useState({ name: "", contact: "", department: "Office of the Captain", message: "" });
   const [newSubscriber, setNewSubscriber] = useState({ email: "", source: "dashboard" });
@@ -728,8 +834,9 @@ export default function RoleDashboard({ role }: DashboardProps) {
   useEffect(() => { void loadDashboardData(); }, [activityLogDate, notificationLogDate]);
   useEffect(() => {
     const timer = window.setInterval(() => {
+      if (document.hidden) return;
       void loadDashboardData(true);
-    }, 8000);
+    }, 45000);
     return () => window.clearInterval(timer);
   }, [role, userCategory, userApprovalCategory, activityLogDate, notificationLogDate]);
   useEffect(() => { void loadUsers(); }, [userCategory, userApprovalCategory]);
@@ -1349,6 +1456,18 @@ export default function RoleDashboard({ role }: DashboardProps) {
     return key.includes(category);
   };
 
+  const getSeminarResidentName = (item: SeminarRequirement) => {
+    if (item.residentName) return item.residentName;
+    if (typeof item.residentId === "object" && item.residentId) return userDisplayName(item.residentId as UserItem);
+    return "Resident";
+  };
+
+  const getSeminarRelatedReference = (item: SeminarRequirement) => {
+    if (item.relatedReferenceNo) return item.relatedReferenceNo;
+    const related = typeof item.relatedComplaintId === "object" && item.relatedComplaintId ? item.relatedComplaintId as ReportItem : null;
+    return related?.referenceNo || item.referenceNumber;
+  };
+
   const filteredAnnouncements = useMemo(
     () => announcements.filter((a) => !a.archived && (announcementCategory === "all" || a.module === announcementCategory) && matchesDashboardSearch(a.title, a.content, a.category, a.module, a.source, a.location, a.status) && matchesTableFilters("announcements", a.createdAt, a.title, a.content, a.category, a.module, a.source, a.location, a.status)),
     [announcements, announcementCategory, normalizedSearch, tableFilters],
@@ -1401,12 +1520,46 @@ export default function RoleDashboard({ role }: DashboardProps) {
   );
   const filteredReports = useMemo(
     () => reports
-      .filter((r) => r.status !== "rejected" && matchesReportCategory(r.category, reportCategory) && matchesDashboardSearch(r.referenceNo, r.category, r.description, r.status, r.adminComment, r.handledByName) && matchesTableFilters("reports", r.createdAt, r.referenceNo, r.fullName, r.contactNumber, r.address, r.category, r.description, r.status, r.adminComment, r.handledByName))
+      .filter((r) => r.status !== "rejected" && r.status !== "archived" && matchesReportCategory(r.category, reportCategory) && matchesDashboardSearch(r.referenceNo, r.category, r.description, r.status, r.adminComment, r.handledByName) && matchesTableFilters("reports", r.createdAt, r.referenceNo, r.fullName, r.contactNumber, r.address, r.category, r.description, r.status, r.adminComment, r.handledByName))
       .sort((a, b) => {
         const diff = new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
         return reportSortOrder === "newest" ? diff : -diff;
       }),
     [reports, reportCategory, normalizedSearch, tableFilters, reportSortOrder],
+  );
+  const caseManagementReports = useMemo(
+    () => reports.filter((r) => {
+      const hasCaseData = Boolean(r.blotterRecord?.referenceNo || r.blotterRecord?.details || r.caseRecord?.referenceNo || r.caseRecord?.details || r.hearingSchedule?.date);
+      const workflowStatus = ["hearing-scheduled", "seminar-intervention-required", "seminar-completed", "missed-seminar", "failed-to-comply", "re-scheduled", "for-resolution", "resolved", "dismissed", "closed"].includes(r.status);
+      return r.status !== "archived" && r.status !== "rejected" && (hasCaseData || workflowStatus || r.reportType === "complaint" || r.reportType === "incident-report");
+    }),
+    [reports],
+  );
+  const filteredSeminarRequirements = useMemo(
+    () => seminarRequirements
+      .filter((item) => matchesDashboardSearch(
+        item.referenceNumber,
+        item.relatedReferenceNo,
+        getSeminarResidentName(item),
+        item.type,
+        item.title,
+        item.status,
+        item.venue,
+        item.remarks,
+      ) && matchesTableFilters(
+        "caseManagement",
+        item.updatedAt || item.createdAt,
+        item.referenceNumber,
+        item.relatedReferenceNo,
+        getSeminarResidentName(item),
+        item.type,
+        item.title,
+        item.status,
+        item.venue,
+        item.remarks,
+      ))
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime()),
+    [seminarRequirements, normalizedSearch, tableFilters],
   );
   const filteredEmergencyAlerts = useMemo(
     () => emergencyAlerts
@@ -1464,7 +1617,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const archivedUsers = useMemo(() => users.filter((u) => u.status === "suspended" && matchesDashboardSearch(u.username, u.firstName, u.middleName, u.lastName, u.email, u.contactNumber, u.address, u.role) && matchesLocalSearch(normalizedRestoreSearch, u.username, u.firstName, u.middleName, u.lastName, u.email, u.contactNumber, u.address, u.role)), [users, normalizedSearch, normalizedRestoreSearch]);
   const archivedOfficials = useMemo(() => officials.filter((o) => o.active === false && matchesDashboardSearch(o.name, o.role, o.committee, o.description, o.level) && matchesLocalSearch(normalizedRestoreSearch, o.name, o.role, o.committee, o.description, o.level)), [officials, normalizedSearch, normalizedRestoreSearch]);
   const archivedAnnouncements = useMemo(() => announcements.filter((a) => a.archived && matchesDashboardSearch(a.title, a.content, a.category, a.module, a.source) && matchesLocalSearch(normalizedRestoreSearch, a.title, a.content, a.category, a.module, a.source)), [announcements, normalizedSearch, normalizedRestoreSearch]);
-  const archivedReports = useMemo(() => reports.filter((r) => r.status === "rejected" && matchesDashboardSearch(r.referenceNo, r.category, r.description, r.status) && matchesLocalSearch(normalizedRestoreSearch, r.referenceNo, r.category, r.description, r.status)), [reports, normalizedSearch, normalizedRestoreSearch]);
+  const archivedReports = useMemo(() => reports.filter((r) => (r.status === "rejected" || r.status === "archived") && matchesDashboardSearch(r.referenceNo, r.category, r.description, r.status) && matchesLocalSearch(normalizedRestoreSearch, r.referenceNo, r.category, r.description, r.status)), [reports, normalizedSearch, normalizedRestoreSearch]);
   const archivedServices = useMemo(() => services.filter((s) => s.status === "rejected" && matchesDashboardSearch(s.referenceNo, s.serviceType, s.fullName, s.status) && matchesLocalSearch(normalizedRestoreSearch, s.referenceNo, s.serviceType, s.fullName, s.status)), [services, normalizedSearch, normalizedRestoreSearch]);
   const archivedMessages = useMemo(() => messages.filter((m) => m.status === "closed" && matchesDashboardSearch(m.referenceNo, m.name, m.department, m.status) && matchesLocalSearch(normalizedRestoreSearch, m.referenceNo, m.name, m.department, m.message, m.status)), [messages, normalizedSearch, normalizedRestoreSearch]);
   const archivedSubscriptions = useMemo(() => subscriptions.filter((s) => s.status === "unsubscribed" && matchesDashboardSearch(s.email, s.source, s.status) && matchesLocalSearch(normalizedRestoreSearch, s.email, s.source, s.status)), [subscriptions, normalizedSearch, normalizedRestoreSearch]);
@@ -1492,6 +1645,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
   const paginatedOfficials = paginateDashboardItems("officials", filteredOfficials);
   const paginatedAnnouncements = paginateDashboardItems("announcements", filteredAnnouncements);
   const paginatedReports = paginateDashboardItems("reports", filteredReports);
+  const paginatedSeminarRequirements = paginateDashboardItems("caseManagement", filteredSeminarRequirements);
   const paginatedEmergencyAlerts = paginateDashboardItems("emergencyAlerts", filteredEmergencyAlerts);
   const paginatedServices = paginateDashboardItems("services", filteredServices);
   const paginatedMessages = paginateDashboardItems("messages", filteredMessages);
@@ -1684,6 +1838,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
         { name: "officials", request: api.get("/api/officials/all", { headers: authHeaders() }) },
         { name: "announcements", request: api.get(canManage ? "/api/announcements/all" : "/api/announcements", { headers: canManage ? authHeaders() : undefined }) },
         { name: "reports", request: api.get("/api/reports", { headers: authHeaders() }) },
+        { name: "seminar requirements", request: api.get("/api/seminars", { headers: authHeaders() }) },
         { name: "service requests", request: api.get("/api/services/requests", { headers: authHeaders() }) },
         { name: "messages", request: api.get("/api/contact/messages", { headers: authHeaders() }) },
         { name: "subscribers", request: api.get("/api/subscriptions", { headers: authHeaders() }) },
@@ -1701,33 +1856,57 @@ export default function RoleDashboard({ role }: DashboardProps) {
         const result = results[index];
         return result.status === "fulfilled" ? (result.value.data || fallback) : fallback;
       };
+      const readListResult = <T,>(index: number): T[] | null => {
+        const result = results[index];
+        if (result.status !== "fulfilled") return null;
+        const data = result.value.data;
+        if (Array.isArray(data)) return data;
+        if (Array.isArray(data?.items)) return data.items;
+        return null;
+      };
       tracker?.update("Applying fresh data to the dashboard...", 78);
-      setUsers(readResult(0, users));
-      setOfficials(readResult(1, officials));
-      setAnnouncements(readResult(2, announcements));
-      setReports(readResult(3, reports));
-      setServices(readResult(4, services));
-      setMessages(readResult(5, messages));
-      setSubscriptions(readResult(6, subscriptions));
-      setEmergencyAlerts(readResult(7, emergencyAlerts));
-      const activityData = readResult<any>(8, []);
-      const notificationData = readResult<any>(9, { items: [] });
-      setActivities(Array.isArray(activityData) ? activityData : activityData?.items || activities);
-      setAdminNotifications(notificationData?.items || adminNotifications);
-      const nextSettings = { ...systemSettings, ...(readResult(10, {}) || {}) };
-      setSystemSettings(nextSettings);
-      setSavedSystemSettings(nextSettings);
+      const nextUsers = readListResult<UserItem>(0);
+      const nextOfficials = readListResult<Official>(1);
+      const nextAnnouncements = readListResult<AnnouncementItem>(2);
+      const nextReports = readListResult<ReportItem>(3);
+      const nextSeminarRequirements = readListResult<SeminarRequirement>(4);
+      const nextServices = readListResult<ServiceRequest>(5);
+      const nextMessages = readListResult<ContactMessage>(6);
+      const nextSubscriptions = readListResult<Subscription>(7);
+      const nextEmergencyAlerts = readListResult<EmergencyAlertItem>(8);
+      if (nextUsers) setUsers(nextUsers);
+      if (nextOfficials) setOfficials(nextOfficials);
+      if (nextAnnouncements) setAnnouncements(nextAnnouncements);
+      if (nextReports) setReports(nextReports);
+      if (nextSeminarRequirements) setSeminarRequirements(nextSeminarRequirements);
+      if (nextServices) setServices(nextServices);
+      if (nextMessages) setMessages(nextMessages);
+      if (nextSubscriptions) setSubscriptions(nextSubscriptions);
+      if (nextEmergencyAlerts) setEmergencyAlerts(nextEmergencyAlerts);
+      const activityData = readResult<any>(9, null);
+      const notificationData = readResult<any>(10, null);
+      if (activityData) setActivities(Array.isArray(activityData) ? activityData : activityData?.items || []);
+      if (notificationData) setAdminNotifications(notificationData?.items || []);
+      const settingsData = readResult<any>(11, null);
+      if (settingsData) {
+        const nextSettings = { ...systemSettings, ...settingsData };
+        setSystemSettings(nextSettings);
+        setSavedSystemSettings(nextSettings);
+      }
       setSiteContent((p) => {
-        const nextContent = { ...p, ...(readResult(11, {}) || {}) };
+        const nextContent = { ...p, ...(readResult(12, {}) || {}) };
         return {
           ...nextContent,
           navbarBrandText: normalizeBrandName(nextContent.navbarBrandText),
           footerBrandText: normalizeBrandName(nextContent.footerBrandText),
         };
       });
-      setMyPermissions(normalizeAdminPermissions(readResult<any>(14, {})?.adminPermissions));
-      setServiceCatalog(readResult(12, serviceCatalog));
-      setDepartments(readResult(13, departments));
+      const accountData = readResult<any>(15, null);
+      if (accountData) setMyPermissions(normalizeAdminPermissions(accountData?.adminPermissions));
+      const nextServiceCatalog = readListResult<any>(13);
+      const nextDepartments = readListResult<Department>(14);
+      if (nextServiceCatalog) setServiceCatalog(nextServiceCatalog);
+      if (nextDepartments) setDepartments(nextDepartments);
       if (canManage) {
         const [evacRes, hotlineRes] = await Promise.allSettled([
           api.get("/api/services/evacuation-centers", { headers: authHeaders() }),
@@ -1765,7 +1944,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
   async function loadUsers() {
     try {
       const usersRes = await api.get("/api/admin/users", { headers: authHeaders(), params: buildUserQueryParams() });
-      setUsers(usersRes.data || []);
+      const data = usersRes.data;
+      setUsers(Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : []);
     } catch (err: any) {
       setFeedback({ type: "error", title: "Load failed", message: err?.response?.data?.msg || "Could not load users." });
     }
@@ -2046,14 +2226,70 @@ export default function RoleDashboard({ role }: DashboardProps) {
 
   async function saveManagedReport(report: ReportItem) {
     await runActionWithFeedback("Report updated", async () => {
-      await api.put(`/api/reports/${report._id}`, report, { headers: authHeaders() });
+      const payload: any = { ...report };
+      delete payload.attachments;
+      await api.put(`/api/reports/${report._id}`, payload, { headers: authHeaders() });
     });
     setReportManageModal(null);
   }
 
+  function getReportResidentId(report?: ReportItem | null) {
+    if (!report?.user) return "";
+    if (typeof report.user === "string") return report.user;
+    return String((report.user as any)._id || "");
+  }
+
+  function openSeminarCreate(report?: ReportItem | null) {
+    setNewSeminar({
+      residentId: getReportResidentId(report),
+      relatedComplaintId: report?._id || "",
+      type: "Barangay Seminar",
+      title: report ? `${readableSlug(report.reportType || "case")} intervention` : "Barangay case intervention",
+      description: report?.description ? `Procedure required before case resolution: ${report.description}` : "",
+      scheduleDate: report?.hearingSchedule?.date || "",
+      scheduleTime: report?.hearingSchedule?.time || "",
+      venue: report?.hearingSchedule?.venue || "Barangay Mambog II Hall",
+      status: report?.hearingSchedule?.date ? "Scheduled" : "Not Yet Scheduled",
+      remarks: "",
+    });
+    setAddSeminarOpen(true);
+  }
+
+  async function createSeminarRequirement() {
+    await runActionWithFeedback("Seminar requirement created", async () => {
+      await api.post("/api/seminars", newSeminar, { headers: authHeaders() });
+    });
+    setAddSeminarOpen(false);
+    setNewSeminar({
+      residentId: "",
+      relatedComplaintId: "",
+      type: "Barangay Seminar",
+      title: "Barangay case intervention",
+      description: "",
+      scheduleDate: "",
+      scheduleTime: "",
+      venue: "Barangay Mambog II Hall",
+      status: "Not Yet Scheduled",
+      remarks: "",
+    });
+  }
+
+  async function saveManagedSeminar(item: SeminarRequirement) {
+    await runActionWithFeedback("Seminar requirement updated", async () => {
+      const payload: any = { ...item };
+      if (typeof payload.residentId === "object") payload.residentId = payload.residentId?._id || "";
+      if (typeof payload.relatedComplaintId === "object") payload.relatedComplaintId = payload.relatedComplaintId?._id || "";
+      await api.put(`/api/seminars/${item._id}`, payload, { headers: authHeaders() });
+    });
+    setSeminarManageModal(null);
+  }
+
   async function saveManagedServiceRequest(request: ServiceRequest) {
     await runActionWithFeedback("Service request updated", async () => {
-      await api.put(`/api/services/requests/${request._id}`, request, { headers: authHeaders() });
+      const payload: any = { ...request };
+      delete payload.requirements;
+      delete payload.issuedDocument;
+      await api.put(`/api/services/requests/${request._id}`, payload, { headers: authHeaders() });
     });
     setServiceManageModal(null);
   }
@@ -2103,7 +2339,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
     { kind: "item", id: "overview", label: "Dashboard", icon: <LayoutDashboard size={16} /> },
     {
       kind: "group",
-      label: "Management",
+      label: "User Management",
       icon: <Users size={16} />,
       open: managementNavOpen,
       setOpen: setManagementNavOpen,
@@ -2112,6 +2348,7 @@ export default function RoleDashboard({ role }: DashboardProps) {
         { id: "officials", label: "Officials", icon: <Building2 size={16} /> },
         { id: "announcements", label: "Announcements", icon: <Bell size={16} /> },
         { id: "reports", label: "Reports", icon: <AlertTriangle size={16} /> },
+        { id: "caseManagement", label: "Blotter / Case Management", icon: <ClipboardCheck size={16} /> },
         { id: "emergencyAlerts", label: "Live Alerts", icon: <MapPin size={16} /> },
         { id: "services", label: "Service Requests", icon: <FileText size={16} /> },
         { id: "messages", label: "Messages", icon: <Mail size={16} /> },
@@ -3014,12 +3251,27 @@ export default function RoleDashboard({ role }: DashboardProps) {
                       <tr key={r._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">{r.referenceNo}</td>
                         <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(r.createdAt)}</td>
-                        <td className="px-4 py-3 text-slate-700">{r.category}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          <p className="font-semibold">{r.category}</p>
+                          <p className="mt-1 text-xs capitalize text-slate-500">{(r.reportType || "community-issue").replace(/-/g, " ")}</p>
+                          <p className="mt-1 text-xs font-bold uppercase text-red-500">{r.priority || "normal"}</p>
+                        </td>
                         <td className="px-4 py-3 text-slate-600">
                           <div className="min-w-[280px] space-y-2">
                             <DetailBlock label="Details">
                               <p className="font-medium">{r.description || "No details provided."}</p>
                             </DetailBlock>
+                            {r.location?.lat && r.location?.lng ? (
+                              <a className="inline-flex items-center gap-1 text-xs font-bold text-blue-700 underline" href={googleMapsUrl(r.location)} target="_blank" rel="noopener noreferrer">
+                                <MapPin size={13} /> Open reported location
+                              </a>
+                            ) : null}
+                            {r.hearingSchedule?.date ? (
+                              <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                                <p className="font-bold">Hearing: {r.hearingSchedule.date} {r.hearingSchedule.time || ""}</p>
+                                <p>{r.hearingSchedule.venue || "Barangay office"}</p>
+                              </div>
+                            ) : null}
                             <div className="flex flex-wrap items-center gap-2">
                               <HandlerPill item={r} />
                               {r.attachments?.length ? (
@@ -3041,10 +3293,11 @@ export default function RoleDashboard({ role }: DashboardProps) {
                           {renderActionControls(`Report ${r.referenceNo}`, (
                           <>
                             {hasModulePermission("reports", "edit") ? <button className={btnSecondary} onClick={() => void openReportManageModal(r)} type="button">Manage</button> : null}
+                            {hasModulePermission("reports", "edit") ? <button className={btnSecondary} onClick={() => openSeminarCreate(r)} type="button">Assign Seminar</button> : null}
                             {hasModulePermission("reports", "archive") ? (
                               <button
                                 className={iconBtn}
-                                onClick={() => setPendingAction({ title: "Archive Report", message: `Archive ${r.referenceNo}?`, confirmLabel: "Archive", run: () => runActionWithFeedback("Report archived", () => api.patch(`/api/reports/${r._id}/status`, { status: "rejected", adminChecked: true }, { headers: authHeaders() })) })}
+                                onClick={() => setPendingAction({ title: "Archive Report", message: `Archive ${r.referenceNo}?`, confirmLabel: "Archive", run: () => runActionWithFeedback("Report archived", () => api.patch(`/api/reports/${r._id}/status`, { status: "archived", adminChecked: true }, { headers: authHeaders() })) })}
                                 type="button"
                                 title="Archive report"
                                 aria-label="Archive report"
@@ -3056,7 +3309,8 @@ export default function RoleDashboard({ role }: DashboardProps) {
                           </>
                           ), [
                             hasModulePermission("reports", "edit") && { label: "Manage", run: () => void openReportManageModal(r) },
-                            hasModulePermission("reports", "archive") && { label: "Archive", run: () => setPendingAction({ title: "Archive Report", message: `Archive ${r.referenceNo}?`, confirmLabel: "Archive", run: () => runActionWithFeedback("Report archived", () => api.patch(`/api/reports/${r._id}/status`, { status: "rejected", adminChecked: true }, { headers: authHeaders() })) }) },
+                            hasModulePermission("reports", "edit") && { label: "Assign Seminar", run: () => openSeminarCreate(r) },
+                            hasModulePermission("reports", "archive") && { label: "Archive", run: () => setPendingAction({ title: "Archive Report", message: `Archive ${r.referenceNo}?`, confirmLabel: "Archive", run: () => runActionWithFeedback("Report archived", () => api.patch(`/api/reports/${r._id}/status`, { status: "archived", adminChecked: true }, { headers: authHeaders() })) }) },
                             hasModulePermission("reports", "delete") && { label: "Delete", tone: "danger", run: () => setPendingAction({ title: "Delete Report", message: `Delete ${r.referenceNo}?`, confirmLabel: "Delete", run: () => runActionWithFeedback("Report deleted", () => api.delete(`/api/reports/${r._id}`, { headers: authHeaders() })) }) },
                           ])}
                         </td>
@@ -3067,6 +3321,114 @@ export default function RoleDashboard({ role }: DashboardProps) {
               </div>
               {filteredReports.length === 0 && <p className="mt-2 text-sm text-slate-500">No reports in this category.</p>}
               {renderDashboardPagination("reports", paginatedReports)}
+            </section>
+          )}
+          {activePanel === "caseManagement" && (
+            <section className={card}>
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold">Blotter / Case Management</h2>
+                  <p className="mt-1 text-sm text-slate-500">Manage complaint records, blotter/case details, hearing schedules, and required seminar or intervention compliance.</p>
+                </div>
+                {hasModulePermission("reports", "edit") ? <button className={btnPrimary} onClick={() => openSeminarCreate()} type="button">Create Seminar Requirement</button> : null}
+              </div>
+              <PanelSearchFilters value={tableFilters.caseManagement} onChange={(next) => updateTableFilter("caseManagement", next)} placeholder="Search case, blotter, resident, or seminar records..." />
+
+              <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">Case / Blotter Records</h3>
+                    <p className="text-xs text-slate-500">Use Manage to add blotter details, case records, hearing schedules, and closure notes.</p>
+                  </div>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">{caseManagementReports.length} active records</span>
+                </div>
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Reference</th>
+                        <th className="px-4 py-3 font-semibold">Resident / Complaint</th>
+                        <th className="px-4 py-3 font-semibold">Blotter / Case / Hearing</th>
+                        <th className="px-4 py-3 font-semibold">Status</th>
+                        <th className="px-4 py-3 font-semibold">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {caseManagementReports.slice(0, 8).map((r) => (
+                        <tr key={`case-${r._id}`} className="border-t border-slate-100 align-top">
+                          <td className="px-4 py-3 font-semibold text-slate-900">{r.referenceNo}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <p className="font-bold">{r.fullName || "Resident / Reporter"}</p>
+                            <p className="mt-1 text-xs text-slate-500">{r.category} - {(r.reportType || "community issue").replace(/-/g, " ")}</p>
+                          </td>
+                          <td className="px-4 py-3 text-xs leading-5 text-slate-600">
+                            <p><span className="font-bold text-slate-500">Blotter:</span> {r.blotterRecord?.referenceNo || r.blotterRecord?.details || "Not encoded"}</p>
+                            <p><span className="font-bold text-slate-500">Case:</span> {r.caseRecord?.referenceNo || r.caseRecord?.details || "Not encoded"}</p>
+                            <p><span className="font-bold text-slate-500">Hearing:</span> {r.hearingSchedule?.date ? `${r.hearingSchedule.date} ${r.hearingSchedule.time || ""} ${r.hearingSchedule.venue || ""}` : "Not scheduled"}</p>
+                            {r.closure?.closedAt ? <p><span className="font-bold text-slate-500">Closure:</span> {r.closure.reason || r.closure.seminarComplianceResult}</p> : null}
+                          </td>
+                          <td className="px-4 py-3"><Badge value={r.status} /></td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              <button className={btnSecondary} onClick={() => void openReportManageModal(r)} type="button">Manage Case</button>
+                              <button className={btnSecondary} onClick={() => openSeminarCreate(r)} type="button">Assign Seminar</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {caseManagementReports.length === 0 ? <p className="mt-3 text-sm text-slate-500">No case or blotter records yet. Create or update a complaint report first.</p> : null}
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">Seminar / Intervention Requirements</h3>
+                    <p className="text-xs text-slate-500">Cases cannot be closed while a required seminar/intervention remains incomplete, unless superadmin provides an override reason.</p>
+                  </div>
+                  <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-bold text-slate-600">{filteredSeminarRequirements.length} requirement records</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">Requirement</th>
+                        <th className="px-4 py-3 font-semibold">Resident / Case</th>
+                        <th className="px-4 py-3 font-semibold">Schedule</th>
+                        <th className="px-4 py-3 font-semibold">Status</th>
+                        <th className="px-4 py-3 font-semibold">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedSeminarRequirements.items.map((item) => (
+                        <tr key={item._id} className="border-t border-slate-100 align-top">
+                          <td className="px-4 py-3 text-slate-700">
+                            <p className="font-bold text-slate-900">{item.title}</p>
+                            <p className="text-xs text-slate-500">{item.referenceNumber} - {item.type}</p>
+                            {item.description ? <p className="mt-1 text-xs text-slate-500">{item.description}</p> : null}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            <p className="font-semibold">{getSeminarResidentName(item)}</p>
+                            <p className="text-xs text-slate-500">{getSeminarRelatedReference(item)}</p>
+                          </td>
+                          <td className="px-4 py-3 text-xs leading-5 text-slate-600">
+                            <p>{item.scheduleDate || "Not yet scheduled"} {item.scheduleTime || ""}</p>
+                            <p>{item.venue || "Venue not set"}</p>
+                          </td>
+                          <td className="px-4 py-3"><Badge value={item.status} /></td>
+                          <td className="px-4 py-3">
+                            <button className={btnSecondary} onClick={() => setSeminarManageModal(item)} type="button">Manage</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {filteredSeminarRequirements.length === 0 ? <p className="mt-2 text-sm text-slate-500">No seminar or intervention requirements match this filter.</p> : null}
+              {renderDashboardPagination("caseManagement", paginatedSeminarRequirements)}
             </section>
           )}
           {activePanel === "emergencyAlerts" && (
@@ -3259,13 +3621,23 @@ export default function RoleDashboard({ role }: DashboardProps) {
                       <tr key={s._id} className="border-t border-slate-200 align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">{s.referenceNo}</td>
                         <td className="px-4 py-3 text-xs font-semibold text-slate-500">{formatDateTime(s.createdAt)}</td>
-                        <td className="px-4 py-3 text-slate-700">{s.serviceType}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          <p className="font-semibold">{formatCodeLabel(s.serviceType)}</p>
+                          {s.requirements?.length ? <p className="mt-1 text-xs font-bold text-blue-700">{s.requirements.length} requirement upload{s.requirements.length > 1 ? "s" : ""}</p> : null}
+                        </td>
                         <td className="px-4 py-3 text-slate-600">
                           <div className="min-w-[260px] space-y-2">
                             <DetailBlock label="Resident">
                               <p className="font-semibold">{s.fullName}</p>
+                              {s.requestFor === "on-behalf" && s.beneficiary?.fullName ? <p className="mt-1 text-xs text-blue-700">On behalf of {s.beneficiary.fullName}</p> : null}
                               {s.purpose ? <p className="mt-1 text-xs text-slate-500">Purpose: {s.purpose}</p> : null}
                             </DetailBlock>
+                            {s.issuedDocument?.referenceNo ? (
+                              <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                                <p className="font-bold">Released document: {s.issuedDocument.referenceNo}</p>
+                                <p>Code: {s.issuedDocument.verificationCode || "N/A"}</p>
+                              </div>
+                            ) : null}
                             <HandlerPill item={s} />
                             <AdminCommentBlock value={s.adminComment} />
                           </div>
@@ -4298,6 +4670,113 @@ export default function RoleDashboard({ role }: DashboardProps) {
         </div>
       )}
 
+      {addSeminarOpen && (
+        <div className={modalOverlay}>
+          <div className={`${modalCard} max-w-2xl`}>
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold">Create Seminar / Intervention Requirement</h3>
+                <p className="mt-1 text-sm text-slate-500">Connect this requirement to a resident and a complaint, blotter, or case record.</p>
+              </div>
+              <button onClick={() => setAddSeminarOpen(false)} type="button"><X size={18} /></button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full">
+              <LabeledField label="Resident">
+                <select className={inputBase} value={newSeminar.residentId} onChange={(e) => setNewSeminar((p) => ({ ...p, residentId: e.target.value }))}>
+                  <option value="">Select resident</option>
+                  {users.filter((user) => user.role === "resident" && user.status !== "suspended").map((user) => (
+                    <option key={user._id} value={user._id}>{userDisplayName(user)} - {user.email}</option>
+                  ))}
+                </select>
+              </LabeledField>
+              <LabeledField label="Related Complaint / Blotter / Case">
+                <select
+                  className={inputBase}
+                  value={newSeminar.relatedComplaintId}
+                  onChange={(e) => {
+                    const selected = reports.find((report) => report._id === e.target.value);
+                    setNewSeminar((p) => ({ ...p, relatedComplaintId: e.target.value, residentId: getReportResidentId(selected) || p.residentId }));
+                  }}
+                >
+                  <option value="">Select related record</option>
+                  {reports.map((report) => (
+                    <option key={report._id} value={report._id}>{report.referenceNo} - {report.fullName || report.category}</option>
+                  ))}
+                </select>
+              </LabeledField>
+              <LabeledField label="Type">
+                <select className={inputBase} value={newSeminar.type} onChange={(e) => setNewSeminar((p) => ({ ...p, type: e.target.value as SeminarRequirement["type"] }))}>
+                  {SEMINAR_TYPE_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </LabeledField>
+              <LabeledField label="Status">
+                <select className={inputBase} value={newSeminar.status} onChange={(e) => setNewSeminar((p) => ({ ...p, status: e.target.value as SeminarRequirement["status"] }))}>
+                  {SEMINAR_STATUS_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </LabeledField>
+              <LabeledField label="Title / Topic" className="md:col-span-2"><input className={inputBase} value={newSeminar.title} onChange={(e) => setNewSeminar((p) => ({ ...p, title: e.target.value }))} /></LabeledField>
+              <LabeledField label="Description / Instructions" className="md:col-span-2"><textarea className={inputBase} rows={3} value={newSeminar.description} onChange={(e) => setNewSeminar((p) => ({ ...p, description: e.target.value }))} /></LabeledField>
+              <LabeledField label="Scheduled Date"><input className={inputBase} type="date" value={newSeminar.scheduleDate} onChange={(e) => setNewSeminar((p) => ({ ...p, scheduleDate: e.target.value }))} /></LabeledField>
+              <LabeledField label="Scheduled Time"><input className={inputBase} type="time" value={newSeminar.scheduleTime} onChange={(e) => setNewSeminar((p) => ({ ...p, scheduleTime: e.target.value }))} /></LabeledField>
+              <LabeledField label="Venue"><input className={inputBase} value={newSeminar.venue} onChange={(e) => setNewSeminar((p) => ({ ...p, venue: e.target.value }))} /></LabeledField>
+              <LabeledField label="Admin Remarks"><input className={inputBase} value={newSeminar.remarks} onChange={(e) => setNewSeminar((p) => ({ ...p, remarks: e.target.value }))} /></LabeledField>
+            </div>
+            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Create Seminar Requirement", message: "Assign this required seminar/intervention to the resident?", confirmLabel: "Create", run: createSeminarRequirement })} type="button">Create Requirement</button>
+          </div>
+        </div>
+      )}
+
+      {seminarManageModal && (
+        <div className={modalOverlay}>
+          <div className={`${modalCard} max-w-2xl`}>
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Seminar / Intervention</p>
+                <h3 className="text-lg font-bold">{seminarManageModal.referenceNumber}</h3>
+                <p className="mt-1 text-sm text-slate-500">{getSeminarResidentName(seminarManageModal)} - {getSeminarRelatedReference(seminarManageModal)}</p>
+              </div>
+              <button onClick={() => setSeminarManageModal(null)} type="button"><X size={18} /></button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full">
+              <LabeledField label="Type">
+                <select className={inputBase} value={seminarManageModal.type} onChange={(e) => setSeminarManageModal((p) => p ? { ...p, type: e.target.value as SeminarRequirement["type"] } : p)}>
+                  {SEMINAR_TYPE_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </LabeledField>
+              <LabeledField label="Status">
+                <select className={inputBase} value={seminarManageModal.status} onChange={(e) => setSeminarManageModal((p) => p ? { ...p, status: e.target.value as SeminarRequirement["status"] } : p)}>
+                  {SEMINAR_STATUS_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </LabeledField>
+              <LabeledField label="Title / Topic" className="md:col-span-2"><input className={inputBase} value={seminarManageModal.title || ""} onChange={(e) => setSeminarManageModal((p) => p ? { ...p, title: e.target.value } : p)} /></LabeledField>
+              <LabeledField label="Description / Instructions" className="md:col-span-2"><textarea className={inputBase} rows={3} value={seminarManageModal.description || ""} onChange={(e) => setSeminarManageModal((p) => p ? { ...p, description: e.target.value } : p)} /></LabeledField>
+              <LabeledField label="Scheduled Date"><input className={inputBase} type="date" value={seminarManageModal.scheduleDate || ""} onChange={(e) => setSeminarManageModal((p) => p ? { ...p, scheduleDate: e.target.value } : p)} /></LabeledField>
+              <LabeledField label="Scheduled Time"><input className={inputBase} type="time" value={seminarManageModal.scheduleTime || ""} onChange={(e) => setSeminarManageModal((p) => p ? { ...p, scheduleTime: e.target.value } : p)} /></LabeledField>
+              <LabeledField label="Venue"><input className={inputBase} value={seminarManageModal.venue || ""} onChange={(e) => setSeminarManageModal((p) => p ? { ...p, venue: e.target.value } : p)} /></LabeledField>
+              <LabeledField label="Completion Proof">
+                <input
+                  className={inputBase}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    fileToBase64(file, (dataUrl) => setSeminarManageModal((p) => p ? { ...p, completionProof: { name: file.name, type: file.type, size: file.size, dataUrl } } : p));
+                  }}
+                />
+                {seminarManageModal.completionProof?.name ? <span className="mt-1 block text-xs text-slate-500">Uploaded: {seminarManageModal.completionProof.name}</span> : null}
+              </LabeledField>
+              <LabeledField label="Admin Remarks" className="md:col-span-2"><textarea className={inputBase} rows={3} value={seminarManageModal.remarks || ""} onChange={(e) => setSeminarManageModal((p) => p ? { ...p, remarks: e.target.value } : p)} /></LabeledField>
+            </div>
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+              <p><span className="font-bold">Dismissal eligible:</span> {seminarManageModal.status === "Completed" || seminarManageModal.dismissalEligible ? "Yes" : "No, completion is required before case dismissal/closure."}</p>
+              {seminarManageModal.completedAt ? <p><span className="font-bold">Completed:</span> {formatDateTime(seminarManageModal.completedAt)} by {seminarManageModal.completedByName || "Barangay staff"}</p> : null}
+            </div>
+            <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Save Seminar Requirement", message: "Save this seminar/intervention update?", confirmLabel: "Save", run: () => saveManagedSeminar(seminarManageModal) })} type="button">Save Requirement</button>
+          </div>
+        </div>
+      )}
+
       {reportManageModal && (
         <div className={modalOverlay}>
           <div className={`${modalCard} max-w-xl`}>
@@ -4307,8 +4786,41 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Reporter"><input className={inputBase} value={reportManageModal.fullName || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, fullName: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Contact"><input className={inputBase} value={reportManageModal.contactNumber || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, contactNumber: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Address"><input className={inputBase} value={reportManageModal.address || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, address: e.target.value } : p)} /></LabeledField>
+              <LabeledField label="Report Type">
+                <select className={inputBase} value={reportManageModal.reportType || "community-issue"} onChange={(e) => setReportManageModal((p) => p ? { ...p, reportType: e.target.value as ReportItem["reportType"] } : p)}>
+                  <option value="community-issue">community issue</option>
+                  <option value="complaint">complaint</option>
+                  <option value="incident-report">incident report</option>
+                </select>
+              </LabeledField>
+              <LabeledField label="Priority">
+                <select className={inputBase} value={reportManageModal.priority || "normal"} onChange={(e) => setReportManageModal((p) => p ? { ...p, priority: e.target.value as ReportItem["priority"] } : p)}>
+                  <option value="low">low</option>
+                  <option value="normal">normal</option>
+                  <option value="urgent">urgent</option>
+                </select>
+              </LabeledField>
               <LabeledField label="Category"><input className={inputBase} value={reportManageModal.category} onChange={(e) => setReportManageModal((p) => p ? { ...p, category: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Description"><textarea className={inputBase} rows={3} value={reportManageModal.description} onChange={(e) => setReportManageModal((p) => p ? { ...p, description: e.target.value } : p)} /></LabeledField>
+              {reportManageModal.location?.lat && reportManageModal.location?.lng ? (
+                <a className={btnSecondary} href={googleMapsUrl(reportManageModal.location)} target="_blank" rel="noopener noreferrer">
+                  <MapPin size={14} className="mr-1" /> Open Report Location
+                </a>
+              ) : null}
+              <LabeledField label="Assigned Department"><input className={inputBase} value={reportManageModal.assignedDepartment || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, assignedDepartment: e.target.value } : p)} /></LabeledField>
+              <LabeledField label="Assigned Personnel"><input className={inputBase} value={reportManageModal.assignedPersonnel || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, assignedPersonnel: e.target.value } : p)} /></LabeledField>
+              <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-2">
+                <LabeledField label="Blotter Details"><textarea className={inputBase} rows={2} value={reportManageModal.blotterRecord?.details || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, blotterRecord: { ...(p.blotterRecord || {}), details: e.target.value } } : p)} /></LabeledField>
+                <LabeledField label="Blotter Status"><input className={inputBase} value={reportManageModal.blotterRecord?.status || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, blotterRecord: { ...(p.blotterRecord || {}), status: e.target.value } } : p)} /></LabeledField>
+                <LabeledField label="Case Details"><textarea className={inputBase} rows={2} value={reportManageModal.caseRecord?.details || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, caseRecord: { ...(p.caseRecord || {}), details: e.target.value } } : p)} /></LabeledField>
+                <LabeledField label="Case Status"><input className={inputBase} value={reportManageModal.caseRecord?.status || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, caseRecord: { ...(p.caseRecord || {}), status: e.target.value } } : p)} /></LabeledField>
+              </div>
+              <div className="grid gap-3 rounded-xl border border-amber-100 bg-amber-50 p-3 md:grid-cols-2">
+                <LabeledField label="Hearing Date"><input className={inputBase} type="date" value={reportManageModal.hearingSchedule?.date || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, hearingSchedule: { ...(p.hearingSchedule || {}), date: e.target.value } } : p)} /></LabeledField>
+                <LabeledField label="Hearing Time"><input className={inputBase} type="time" value={reportManageModal.hearingSchedule?.time || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, hearingSchedule: { ...(p.hearingSchedule || {}), time: e.target.value } } : p)} /></LabeledField>
+                <LabeledField label="Venue"><input className={inputBase} value={reportManageModal.hearingSchedule?.venue || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, hearingSchedule: { ...(p.hearingSchedule || {}), venue: e.target.value } } : p)} /></LabeledField>
+                <LabeledField label="Hearing Remarks"><textarea className={inputBase} rows={2} value={reportManageModal.hearingSchedule?.remarks || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, hearingSchedule: { ...(p.hearingSchedule || {}), remarks: e.target.value } } : p)} /></LabeledField>
+              </div>
               <LabeledField label='Comment from the admins'><textarea className={inputBase} rows={3} placeholder="Resident-facing update or action taken" value={reportManageModal.adminComment || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, adminComment: e.target.value } : p)} /></LabeledField>
               {renderHandlerSelect(reportManageModal, setReportManageModal)}
               {reportManageModal.attachments?.length ? (
@@ -4323,12 +4835,21 @@ export default function RoleDashboard({ role }: DashboardProps) {
               ) : null}
               <LabeledField label="Status">
                 <select className={inputBase} value={reportManageModal.status} onChange={(e) => setReportManageModal((p) => p ? { ...p, status: e.target.value } : p)}>
-                  <option value="new">new</option>
-                  <option value="in-review">in-review</option>
-                  <option value="resolved">resolved</option>
-                  <option value="rejected">rejected</option>
+                  {REPORT_STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
                 </select>
               </LabeledField>
+              {["resolved", "dismissed", "closed"].includes(reportManageModal.status) ? (
+                <div className="grid gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3 md:grid-cols-2">
+                  <LabeledField label="Closure Reason"><textarea className={inputBase} rows={2} value={reportManageModal.closureReason || reportManageModal.closure?.reason || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, closureReason: e.target.value } : p)} /></LabeledField>
+                  <LabeledField label="Final Remarks"><textarea className={inputBase} rows={2} value={reportManageModal.finalRemarks || reportManageModal.closure?.finalRemarks || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, finalRemarks: e.target.value } : p)} /></LabeledField>
+                  {role === "superadmin" ? (
+                    <LabeledField label="Superadmin Override Reason" className="md:col-span-2">
+                      <textarea className={inputBase} rows={2} value={reportManageModal.overrideReason || reportManageModal.closure?.overrideReason || ""} onChange={(e) => setReportManageModal((p) => p ? { ...p, overrideReason: e.target.value } : p)} placeholder="Required only if closing/dismissing before required seminar completion." />
+                    </LabeledField>
+                  ) : null}
+                  <p className="md:col-span-2 text-xs text-emerald-800">The backend will prevent closure if a related seminar/intervention is incomplete. Superadmin override requires a written reason.</p>
+                </div>
+              ) : null}
             </div>
             <button className={`${btnPrimary} mt-4 w-full text-sm`} onClick={() => setPendingAction({ title: "Update Report", message: "Save report changes?", confirmLabel: "Save", run: () => saveManagedReport(reportManageModal) })} type="button">Save Report</button>
           </div>
@@ -4558,6 +5079,49 @@ export default function RoleDashboard({ role }: DashboardProps) {
               <LabeledField label="Contact"><input className={inputBase} value={serviceManageModal.contactNumber || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, contactNumber: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Address"><input className={inputBase} value={serviceManageModal.address || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, address: e.target.value } : p)} /></LabeledField>
               <LabeledField label="Purpose"><textarea className={inputBase} rows={3} value={serviceManageModal.purpose || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, purpose: e.target.value } : p)} /></LabeledField>
+              {serviceManageModal.requestFor === "on-behalf" ? (
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-950">
+                  <p className="font-bold">Requesting on behalf</p>
+                  <p>Beneficiary: {serviceManageModal.beneficiary?.fullName || "N/A"}</p>
+                  <p>Relationship: {serviceManageModal.beneficiary?.relationship || "N/A"}</p>
+                  <p>Contact: {serviceManageModal.beneficiary?.contactNumber || "N/A"}</p>
+                  {serviceManageModal.beneficiary?.reason ? <p>Reason: {serviceManageModal.beneficiary.reason}</p> : null}
+                </div>
+              ) : null}
+              <LabeledField label="Requirement Status">
+                <select className={inputBase} value={serviceManageModal.requirementStatus || "pending"} onChange={(e) => setServiceManageModal((p) => p ? { ...p, requirementStatus: e.target.value } : p)}>
+                  <option value="pending">pending</option>
+                  <option value="complete">complete</option>
+                  <option value="needs-resubmission">needs resubmission</option>
+                </select>
+              </LabeledField>
+              {serviceManageModal.requirements?.length ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Uploaded Requirements</p>
+                  <div className="space-y-2">
+                    {serviceManageModal.requirements.map((file, index) => (
+                      <a
+                        key={`${file.name || "requirement"}-${index}`}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        href={file.dataUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <span className="truncate">{file.name || `Requirement ${index + 1}`}</span>
+                        <span>{file.size ? `${Math.round(file.size / 1024)} KB` : "Open"}</span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {serviceManageModal.issuedDocument?.referenceNo ? (
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm text-emerald-950">
+                  <p className="font-bold">Released Document</p>
+                  <p>Reference: {serviceManageModal.issuedDocument.referenceNo}</p>
+                  <p>Verification code: {serviceManageModal.issuedDocument.verificationCode || "N/A"}</p>
+                  <p>Released by: {serviceManageModal.issuedDocument.releasedByName || serviceManageModal.handledByName || "Barangay staff"}</p>
+                </div>
+              ) : null}
               <LabeledField label='Comment from the admins'><textarea className={inputBase} rows={3} placeholder="Resident-facing update or action taken" value={serviceManageModal.adminComment || ""} onChange={(e) => setServiceManageModal((p) => p ? { ...p, adminComment: e.target.value } : p)} /></LabeledField>
               {renderHandlerSelect(serviceManageModal, setServiceManageModal)}
               <LabeledField label="Status">
@@ -4565,8 +5129,11 @@ export default function RoleDashboard({ role }: DashboardProps) {
                   <option value="pending">pending</option>
                   <option value="in-review">in-review</option>
                   <option value="approved">approved</option>
+                  <option value="for-pickup">for-pickup</option>
+                  <option value="released">released</option>
                   <option value="completed">completed</option>
                   <option value="rejected">rejected</option>
+                  <option value="cancelled">cancelled</option>
                 </select>
               </LabeledField>
             </div>

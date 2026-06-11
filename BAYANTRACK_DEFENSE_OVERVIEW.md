@@ -236,10 +236,15 @@ Important backend routes:
 Main functions:
 
 - Resident requests barangay services
+- Supports Barangay Clearance, Barangay ID, Certificate of Residency, and Certificate of Indigency
+- Blocks duplicate same-day document requests unless the previous request is rejected or cancelled
+- Allows requirement uploads as image/PDF metadata stored with the request
+- Supports requesting on behalf of another person with beneficiary details
 - Service request gets reference number
 - Resident can view own service request history
 - Admin can update status and comment
-- Admin can mark request pending, in-review, approved, rejected, or completed
+- Admin can mark request pending, in-review, approved, for-pickup, released, rejected, cancelled, or completed
+- Released requests generate issued document tracking details and verification code
 
 Important backend routes:
 
@@ -257,14 +262,19 @@ Important backend routes:
 Main functions:
 
 - Resident or visitor can submit reports
+- Supports community issue reports, complaints, and incident reports
+- Supports priority/urgency and optional reported location coordinates
 - Supports issue categories and optional image attachments
 - Generates report reference number
 - Admin can view, update, resolve, reject, or delete reports
+- Admin can assign department/personnel and add blotter, case, and hearing schedule details
+- Resident activity and notifications can show report updates and hearing schedule information
 - Report updates can notify resident/admins through email
 
 Important backend routes:
 
 - `POST /api/reports`
+- `GET /api/reports/me`
 - `GET /api/reports`
 - `GET /api/reports/:id`
 - `PUT /api/reports/:id`
@@ -748,6 +758,9 @@ Implemented:
 - Mongo payload sanitization
 - Input validation for email, phone, required fields, statuses
 - Child profile photo validation for allowed image data and size limit
+- Duplicate same-day document request prevention for resident service requests
+- Requirement upload validation for resident document requests
+- Report type, priority, and optional location validation for community reports
 - Role-based inactivity/focus-away logout with clear session-expired feedback
 - Resident and linked child sessions time out after 2 minutes away from the site; admin and superadmin sessions time out after 3 minutes away
 - Fresh logins get a short grace period before auth 401 responses can force a logout redirect
@@ -767,6 +780,7 @@ Current implementation:
 - The system does not save uploaded files directly into a public server folder.
 - Attachments are stored as data URLs in MongoDB.
 - Report attachments are limited to image data.
+- Service request requirements are stored as controlled image/PDF data URL metadata for school-scope demonstration.
 - Live chat attachments are normalized and size-limited.
 - Filenames are stored only as metadata, not used as server paths.
 
@@ -848,6 +862,11 @@ Manual flows to test before defense:
 - Child-session profile photo update with parent OTP
 - Child login stays active after redirect and still shows the linked child avatar
 - Profile Settings opens without logging out child sessions even if activity logs fail to load
+- Duplicate same-day service request blocking
+- Requirement upload and request-on-behalf flow
+- Admin marks service request for pickup/released and issued document tracking appears
+- Complaint/incident/community report with priority and location
+- Admin adds hearing schedule connected to a report
 - Service request submit
 - Report issue submit
 - Announcement view and admin edit

@@ -12,6 +12,7 @@
    * A different format will require also updating the theme in tailwind.config.ts.
   */
   :root {
+    --bt-font-scale: 1;
     --background: 0 0% 100%;
     --foreground: 226 58% 15%;
 
@@ -110,8 +111,38 @@
     overflow-x: hidden;
   }
 
+  html {
+    font-size: calc(16px * var(--bt-font-scale, 1));
+  }
+
   body {
     @apply bg-background text-foreground;
+  }
+
+  :where(a, button, input, select, textarea):focus-visible {
+    outline: 3px solid hsl(var(--ring));
+    outline-offset: 3px;
+  }
+
+  .bt-high-contrast body {
+    background: #ffffff;
+    color: #030712;
+  }
+
+  .bt-high-contrast :where(header, section, main, div, article, aside, nav, table, th, td, form) {
+    border-color: #111827 !important;
+  }
+
+  .bt-high-contrast :where(.bg-white, .bg-slate-50, .bg-gray-50, .bg-secondary, .bg-secondary\/30) {
+    background-color: #ffffff !important;
+  }
+
+  .bt-high-contrast :where(.text-slate-400, .text-slate-500, .text-slate-600, .text-gray-500, .text-gray-600, .text-muted-foreground) {
+    color: #111827 !important;
+  }
+
+  .bt-high-contrast :where(button, a[role="button"], .bg-primary, .bg-slate-900, .bg-\[\#395886\]) {
+    filter: contrast(1.15);
   }
 
   :where(p, span, li, h1, h2, h3, h4, h5, h6, a, button, label, td, th) {

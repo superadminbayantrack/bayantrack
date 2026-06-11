@@ -7,6 +7,8 @@ import ActivityLog from '../models/ActivityLog.js';
 import NotificationState from '../models/NotificationState.js';
 import SystemSetting from '../models/SystemSetting.js';
 import ServiceRequest from '../models/ServiceRequest.js';
+import IssueReport from '../models/IssueReport.js';
+import SeminarRequirement from '../models/SeminarRequirement.js';
 import { auth } from '../middleware/auth.js';
 import { AUTH_COOKIE_NAME, getAuthCookieOptions, getJwtSecret, isProductionEnv } from '../config/env.js';
 import { getAdminNotificationRecipients, logSystemEvent, sendUserMail } from '../utils/notifications.js';
@@ -997,11 +999,19 @@ router.get('/notifications', auth, async (req, res) => {
   try {
     const state = await NotificationState.findOne({ actorId: residentNotificationActorKey(req.user) }).lean();
     const clearedAt = state?.clearedAt ? new Date(state.clearedAt) : null;
-    const [latestServices, latestActivity] = await Promise.all([
+    const [latestServices, latestReports, latestSeminars, latestActivity] = await Promise.all([
       ServiceRequest.find({ user: req.user.id })
         .sort({ updatedAt: -1 })
         .limit(6)
-        .select('referenceNo serviceType status updatedAt createdAt'),
+        .select('referenceNo serviceType status issuedDocument updatedAt createdAt'),
+      IssueReport.find({ user: req.user.id })
+        .sort({ updatedAt: -1 })
+        .limit(6)
+        .select('referenceNo reportType category status priority hearingSchedule updatedAt createdAt'),
+      SeminarRequirement.find({ residentId: req.user.id })
+        .sort({ updatedAt: -1 })
+        .limit(6)
+        .select('referenceNumber relatedReferenceNo type title scheduleDate scheduleTime venue status remarks updatedAt createdAt'),
       ActivityLog.find({ user: req.user.id })
         .sort({ createdAt: -1 })
         .limit(6)
@@ -1014,6 +1024,20 @@ router.get('/notifications', auth, async (req, res) => {
         kind: 'service',
         title: `${s.serviceType} is now ${s.status}`,
         subtitle: s.referenceNo,
+        createdAt: s.updatedAt || s.createdAt,
+      })),
+      ...latestReports.map((r) => ({
+        id: `rpt-${r._id}`,
+        kind: 'report',
+        title: `${r.category} report is now ${r.status}`,
+        subtitle: r.hearingSchedule?.date ? `${r.referenceNo} - hearing ${r.hearingSchedule.date}` : r.referenceNo,
+        createdAt: r.updatedAt || r.createdAt,
+      })),
+      ...latestSeminars.map((s) => ({
+        id: `sem-${s._id}`,
+        kind: 'seminar-intervention',
+        title: `${s.title} is ${s.status}`,
+        subtitle: [s.relatedReferenceNo || s.referenceNumber, s.scheduleDate ? `${s.scheduleDate} ${s.scheduleTime || ''}`.trim() : '', s.venue].filter(Boolean).join(' - '),
         createdAt: s.updatedAt || s.createdAt,
       })),
       ...latestActivity.map((a) => ({

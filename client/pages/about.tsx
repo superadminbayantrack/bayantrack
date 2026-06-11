@@ -107,6 +107,32 @@ export default function About() {
               <ProgramCard icon={<ShieldCheck className="h-6 w-6 text-brand-blue" />} title="Peace & Order" desc="24/7 barangay tanod patrols, CCTV monitoring of major streets, and Lupong Tagapamayapa dispute resolution." />
             </div>
           </div>
+
+          <div className="grid gap-8 lg:grid-cols-2">
+            <Card className="border-none shadow-xl shadow-primary/5 rounded-[2rem] bg-white p-8">
+              <div className="mb-5 flex items-center gap-3">
+                <Info className="h-5 w-5 text-brand-blue" />
+                <h2 className="text-xl font-extrabold text-primary">System Scope</h2>
+              </div>
+              <ul className="space-y-3 text-sm font-medium leading-relaxed text-muted-foreground">
+                <li>BayanTrack focuses on online barangay service requests, community issue reporting, resident status tracking, and information dissemination for Barangay Mambog II.</li>
+                <li>Residents can request documents, upload requirements, report issues, receive updates, and use the chatbot for basic guidance.</li>
+                <li>Barangay staff can review resident records, manage requests, update reports, publish announcements, and monitor activity logs.</li>
+              </ul>
+            </Card>
+            <Card className="border-none shadow-xl shadow-primary/5 rounded-[2rem] bg-white p-8">
+              <div className="mb-5 flex items-center gap-3">
+                <Info className="h-5 w-5 text-brand-red" />
+                <h2 className="text-xl font-extrabold text-primary">Study Limitations</h2>
+              </div>
+              <ul className="space-y-3 text-sm font-medium leading-relaxed text-muted-foreground">
+                <li>The system requires a stable internet connection and does not include online payment for barangay service fees.</li>
+                <li>It does not replace face-to-face transactions for emergency cases or highly sensitive concerns requiring personal verification.</li>
+                <li>The chatbot is for FAQs and navigation only; it does not make official barangay decisions.</li>
+                <li>The system is limited to Barangay Mambog II, Bacoor, Cavite.</li>
+              </ul>
+            </Card>
+          </div>
         </section>
       </Reveal>
 
